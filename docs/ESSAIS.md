@@ -11,41 +11,47 @@ c'est justement l'une des choses à tester.
 ## 1. Installation (sur les deux machines)
 
 ```sh
-unzip bernard-*.zip && cd bernard
-sudo apt install ./dist/bernard_*.deb
+sudo apt install ./bernard_*_amd64.deb
 ```
 
-Sur une base Ubuntu 24.04 (Zorin 18, Mint 22), ajoutez la fenêtre dédiée :
-`sudo apt install ./dist/bernard-window_*.deb`.
-
-Sur la cible, pour la fenêtre dédiée (facultatif) :
-`sudo apt install gcc pkg-config libwebkit2gtk-4.1-dev` et Go 1.22 ou plus
-récent (`sudo snap install go --classic` si celui des dépôts est trop
-ancien, ce qui est le cas sur Zorin 17), puis `make window` et
-`sudo install -m755 bin/bernard-window /usr/bin/`. Sans la fenêtre, Bernard
-s'ouvre dans le navigateur : c'est un essai tout aussi valable.
+Un seul paquet, fenêtre dédiée comprise. Sur une machine qui avait la 0.1,
+l'ancien paquet `bernard-window` est retiré automatiquement.
 
 Pare-feu : si `sudo ufw status` indique « active » sur la cible, ouvrez
 `sudo ufw allow 51515/udp` et `sudo ufw allow 51516/tcp`.
 
 ## 2. Parcours à tester
 
-1. Cible : menu → Bernard. Le mot de passe administrateur est demandé.
-2. Choisir « Depuis un autre ordinateur ». Noter le code.
-3. Source : `sudo bernard-agent connect`. La cible doit être trouvée seule.
-   Variante à tester : lancer l'agent **avant** d'ouvrir Bernard sur la cible
-   (voire avant d'installer Linux) ; il doit attendre, sans que la source se
-   mette en veille, puis trouver la cible dès son apparition.
-4. Saisir le code. Vérifier l'écran de choix : comptes, dossiers, applications.
-5. Lancer, puis pendant le transfert :
-   - débrancher le câble réseau si vous êtes en filaire avec le Wi-Fi actif :
-     le bandeau « Liaison perdue » doit apparaître puis disparaître seul ;
-   - ou couper le Wi-Fi quelques secondes.
-6. Au bilan : se déconnecter, se connecter avec le compte migré, vérifier
+Tout se fait dans l'interface graphique, sur les deux machines.
+
+1. Source : menu → Bernard → « Ceci est l'ancien ordinateur » →
+   « Directement au nouvel ordinateur ». Elle attend.
+   Variante à tester : lancer la source **avant** la cible (voire avant
+   d'installer Linux sur la cible) ; elle doit patienter sans se mettre en
+   veille, puis trouver la cible dès son apparition.
+2. Cible : menu → Bernard → « Ceci est le nouvel ordinateur » → « Depuis un
+   autre ordinateur ». Le mot de passe administrateur est demandé. Noter le code.
+3. Source : l'écran « Nouvel ordinateur trouvé » apparaît ; saisir le code.
+   Essayer d'abord un mauvais code : le message doit être clair.
+4. Cible : vérifier l'écran de choix (comptes, dossiers, applications), lancer.
+   La source affiche « Faites votre choix », puis « Installation des comptes
+   et des applications », puis la progression de l'envoi.
+5. Pendant l'envoi, en Wi-Fi : **brancher un câble réseau** sur les deux
+   machines (ou vers la box). En moins de 15 secondes, le champ « Liaison »
+   de la source doit passer à « Câble réseau (RJ45) » et le débit augmenter.
+   Puis débrancher le câble : bandeau « Liaison perdue », reprise seule par le
+   Wi-Fi.
+6. Tester « Arrêter » sur la source : la cible affiche un nouveau code ;
+   « Reprendre » sur la source, saisir ce code, l'envoi reprend sans renvoyer
+   ce qui est déjà arrivé.
+7. Au bilan : se déconnecter, se connecter avec le compte migré, vérifier
    fichiers, mot de passe, applications (dont une Flatpak), fond d'écran,
    disposition du clavier, dock, Wi-Fi mémorisé, imprimante réseau.
-7. Relancer Bernard et tester « Annuler la migration » sur une migration,
+8. Relancer Bernard et tester « Annuler la migration » sur une migration,
    si la machine peut être remise à zéro.
+
+Point à surveiller : la vitesse sur les dossiers pleins de petits fichiers
+(`.config`, `.local/share`, jeux) doit être nettement meilleure qu'en 0.1.
 
 ## 3. À noter pour chaque essai
 
@@ -57,8 +63,11 @@ Pare-feu : si `sudo ufw status` indique « active » sur la cible, ouvrez
 
 ## 4. Essai sans réseau
 
+Source : Bernard → « Ceci est l'ancien ordinateur » → « Sur un disque
+externe » : choisir le disque, la phrase de passe, écrire. Cible : Bernard →
+« Ceci est le nouvel ordinateur » → « Depuis un disque externe ».
+
 ```sh
-# Source
+# Équivalent en ligne de commande, côté source
 sudo bernard-agent pack --dest /media/$USER/<disque>/migration
-# Cible : menu → Bernard → « Depuis un disque externe »
 ```

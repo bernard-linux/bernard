@@ -84,6 +84,11 @@ func (s *Server) routes() http.Handler {
 	api.HandleFunc("/api/stop", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.Stop(); return nil }))
 	api.HandleFunc("/api/reset", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.Reset(); return nil }))
 	api.HandleFunc("/api/undo", s.post(func(w http.ResponseWriter, r *http.Request) error { return s.Ctrl.UndoMigration() }))
+	api.HandleFunc("/api/role", s.post(s.handleRole))
+	api.HandleFunc("/api/source", s.post(s.handleSource))
+	api.HandleFunc("/api/pair", s.post(s.handlePair))
+	api.HandleFunc("/api/pack", s.post(s.handlePack))
+	api.HandleFunc("/api/disks", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.RefreshDisks(); return nil }))
 	api.HandleFunc("/api/quit", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.RequestQuit(); return nil }))
 	mux.Handle("/api/", s.guard(api))
 	return mux
@@ -226,4 +231,48 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return s.Ctrl.Submit(req.Selected, req.Passwords)
+}
+
+func (s *Server) handleRole(w http.ResponseWriter, r *http.Request) error {
+	var req struct{ Role string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return s.Ctrl.ChooseRole(req.Role)
+}
+
+func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) error {
+	var req struct{ Mode string }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	switch req.Mode {
+	case "network":
+		return s.Ctrl.StartSource()
+	case "disk":
+		return s.Ctrl.ShowSourceDisk()
+	}
+	return fmt.Errorf("mode inconnu : %q", req.Mode)
+}
+
+func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Target string `json:"target"`
+		Code   string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return s.Ctrl.Pair(req.Target, req.Code)
+}
+
+func (s *Server) handlePack(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Disk       string `json:"disk"`
+		Passphrase string `json:"passphrase"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return s.Ctrl.StartPack(req.Disk, req.Passphrase)
 }

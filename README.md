@@ -23,47 +23,46 @@ Linux, Windows ou Mac.
 
 Ubuntu, Zorin OS et Debian avec GNOME ; Linux Mint avec Cinnamon.
 
-## Utiliser l'assistant graphique
+## Utiliser Bernard
 
-Sur le **nouvel** ordinateur : menu des applications → Bernard (ou `bernard gui`).
-Le mot de passe administrateur est demandé, puis l'assistant s'ouvre dans sa
-propre fenêtre. Sur l'**ancien** ordinateur : `sudo bernard-agent connect`,
-puis le code affiché.
+Installez le même paquet sur les **deux** ordinateurs (double-clic sur le
+fichier, ou `sudo apt install ./bernard_*.deb`), puis ouvrez **Bernard** depuis
+le menu des applications, sur chacun, dans l'ordre que vous voulez. Aucun
+terminal n'est nécessaire.
 
-L'agent peut être lancé **avant** le nouvel ordinateur, même avant d'y
-installer Linux : il attend sans limite de durée (écoute passive, aucun trafic
-réseau), bloque la mise en veille, et ne fait l'inventaire qu'une fois le
-nouvel ordinateur trouvé, pour envoyer des données à jour. `--timeout 2h`
-fixe une limite ; Ctrl+C abandonne.
+- **Nouvel ordinateur :** « Ceci est le nouvel ordinateur », puis « Depuis un
+  autre ordinateur ». Un code à 6 chiffres s'affiche.
+- **Ancien ordinateur :** « Ceci est l'ancien ordinateur », puis
+  « Directement au nouvel ordinateur ». Il attend le nouveau aussi longtemps
+  qu'il le faut (même pendant l'installation de Linux sur celui-ci), sans
+  charger le réseau et sans se mettre en veille, puis demande le code.
+- Choisissez ensuite, sur le nouvel ordinateur, ce qui vient avec vous. Les
+  deux écrans suivent l'avancement.
 
-Installation à partir des paquets fournis dans `dist/` :
+Sans réseau commun : « Sur un disque externe » sur l'ancien ordinateur (paquet
+chiffré par une phrase de passe), puis « Depuis un disque externe » sur le
+nouveau.
 
-```sh
-sudo apt install ./dist/bernard_*.deb            # moteur et agent (toutes versions)
-sudo apt install ./dist/bernard-window_*.deb     # fenêtre dédiée (Ubuntu 24.04 et dérivées)
-```
+En cours de transfert, un câble réseau branché est repéré de lui-même :
+Bernard bascule dessus sans rien interrompre. Une coupure ou un arrêt
+volontaire se reprend là où il s'était arrêté.
 
-Le paquet `bernard-window` fourni est construit pour Ubuntu 24.04 (Zorin 18,
-Mint 22). Pour Zorin 17 ou Mint 21, construisez-le sur place
-(`packaging/deb/build.sh 1.0.0`) ou passez-vous-en : l'assistant s'ouvre
-alors dans le navigateur.
+Le paquet contient la fenêtre dédiée (WebKitGTK) ; un seul fichier sert pour
+Zorin OS 17 et 18, Linux Mint 21 et 22, Ubuntu 22.04 et 24.04, Debian 12. Il
+remplace l'ancien paquet séparé `bernard-window` (versions 0.1).
 
-Pour la fenêtre dédiée, compilez-la sur la machine cible (sinon l'assistant
-s'ouvre dans le navigateur) :
-
-```sh
-sudo apt install gcc pkg-config libwebkit2gtk-4.1-dev
-make window && sudo install -m755 bin/bernard-window /usr/bin/
-```
+La commande `sudo bernard-agent connect` reste disponible pour les
+administrateurs et les machines sans écran.
 
 Guide des essais entre deux ordinateurs : [docs/ESSAIS.md](docs/ESSAIS.md).
 
 ## Essayer (développeurs)
 
 Prérequis : Go 1.22 ou plus récent. `make build` produit `bin/bernard` et
-`bin/bernard-agent` ; `make window` produit `bin/bernard-window` ;
-`sudo make install` installe le tout, avec l'entrée de menu et la politique
-polkit.
+`bin/bernard-agent` ; `make window` produit `bin/bernard-window` (paquets
+`gcc pkg-config libwebkit2gtk-4.1-dev`) ; `sudo make install` installe le
+tout, avec l'entrée de menu et la politique polkit.
+`packaging/deb/build.sh 0.2.0` construit le paquet Debian dans `dist/`.
 
 **Migration réelle par le réseau** (Wi-Fi, câble RJ45, Thunderbolt/USB4) :
 
@@ -81,7 +80,8 @@ les mots de passe devront être saisis à nouveau.
 
 On peut changer de liaison en cours de route (débrancher le câble, passer en
 Wi-Fi) : la session se rétablit seule, sans nouveau code, et la copie reprend
-au dernier point vérifié.
+au dernier point vérifié. Un câble branché pendant un transfert en Wi-Fi est
+repéré en quelques secondes, et l'agent bascule dessus de lui-même.
 
 **Mode essai** (données seulement, sans toucher au système) :
 

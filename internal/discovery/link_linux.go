@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // linkInfo lit le type et la vitesse d'une interface dans /sys/class/net.
@@ -32,4 +33,15 @@ func linkInfo(name string) (string, int) {
 		return LinkEthernet, speed
 	}
 	return LinkOther, speed
+}
+
+// bindToDevice lie une socket à une interface (SO_BINDTODEVICE, réservé à
+// l'administrateur ; sans effet sinon : la socket reste liée à l'adresse).
+func bindToDevice(name string) func(string, string, syscall.RawConn) error {
+	return func(_, _ string, c syscall.RawConn) error {
+		c.Control(func(fd uintptr) {
+			syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, name)
+		})
+		return nil
+	}
 }

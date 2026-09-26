@@ -140,3 +140,50 @@ func TestCollectOnFakeSystem(t *testing.T) {
 		t.Errorf("origine Snap attendue : %+v", inv.Apps[3])
 	}
 }
+
+// Un système monté ailleurs (--root) est lu dans ses fichiers, jamais via
+// les commandes de la machine qui exécute l'agent.
+func TestOfflineRootReadsItsOwnApps(t *testing.T) {
+	root := t.TempDir()
+	put := func(rel, content string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755)
+		os.WriteFile(filepath.Join(root, rel), []byte(content), 0o644)
+	}
+	put("etc/os-release", "ID=zorin\nVERSION_ID=\"17\"\n")
+	put("etc/passwd", "root:x:0:0::/root:/bin/bash\nalice:x:1000:1000:Alice,,,:/home/alice:/bin/bash\n")
+	put("etc/group", "alice:x:1000:\n")
+	put("home/alice/Documents/a.txt", "a")
+	put("var/lib/dpkg/status", "Package: gimp\nStatus: install ok installed\nVersion: 2.10\nDescription: x\n continuation\n\n"+
+		"Package: libfoo\nStatus: install ok installed\nVersion: 1\n\nPackage: removed\nStatus: deinstall ok config-files\nVersion: 1\n")
+	put("var/lib/apt/extended_states", "Package: libfoo\nArchitecture: amd64\nAuto-Installed: 1\n")
+	put("var/lib/flatpak/app/org.videolan.VLC/current", "")
+	put("home/alice/.local/share/flatpak/app/com.valvesoftware.Steam/x", "")
+	os.MkdirAll(filepath.Join(root, "snap/firefox/4000"), 0o755)
+	os.Symlink("4000", filepath.Join(root, "snap/firefox/current"))
+	os.MkdirAll(filepath.Join(root, "snap/core22/1"), 0o755)
+	os.Symlink("1", filepath.Join(root, "snap/core22/current"))
+	put("etc/cups/printers.conf", "<DefaultPrinter Bureau>\n</DefaultPrinter>\n")
+
+	calls := 0
+	inv, err := Collect(context.Background(), Options{Root: root, Offline: true, Runner: func(ctx context.Context, name string, args ...string) (string, error) {
+		calls++
+		return "", ErrMissingCommand
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range inv.Apps {
+		got = append(got, a.SourceID)
+	}
+	want := "apt:gimp flatpak:com.valvesoftware.Steam flatpak:org.videolan.VLC snap:firefox"
+	if strings.Join(got, " ") != want {
+		t.Errorf("applications : %v, attendu %s", got, want)
+	}
+	if len(inv.Network.Printers) != 1 || inv.Network.Printers[0] != "Bureau" {
+		t.Errorf("imprimantes : %v", inv.Network.Printers)
+	}
+	if calls > 0 {
+		t.Errorf("%d commandes lancées pour un système hors ligne", calls)
+	}
+}

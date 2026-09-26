@@ -21,6 +21,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/engine"
 	"github.com/bernard-linux/bernard/internal/inventory"
+	"github.com/bernard-linux/bernard/internal/keepawake"
 	"github.com/bernard-linux/bernard/internal/link"
 	"github.com/bernard-linux/bernard/internal/migrate"
 	"github.com/bernard-linux/bernard/internal/pack"
@@ -93,6 +94,15 @@ type State struct {
 	Result    *migrate.Result       `json:"result,omitempty"`
 	Undo      *UndoInfo             `json:"undo,omitempty"`
 	Busy      bool                  `json:"busy"`
+
+	// Rôle de cet ordinateur : target (nouveau) ou source (ancien).
+	Role string `json:"role,omitempty"`
+	// Côté ancien ordinateur.
+	Targets   []TargetInfo `json:"targets,omitempty"`
+	Waited    int64        `json:"waited,omitempty"` // secondes d'attente
+	Inventory *InvSummary  `json:"inventory,omitempty"`
+	Send      *SendInfo    `json:"send,omitempty"`
+	Disks     []DiskInfo   `json:"disks,omitempty"`
 }
 
 // Controller pilote une migration à la fois.
@@ -106,6 +116,15 @@ type Controller struct {
 	choices chan migrate.Choices
 	sess    *migrate.Session
 	quit    chan struct{}
+
+	ctx  context.Context // contexte de l'opération en cours
+	lock *keepawake.Lock // pas de mise en veille pendant une opération
+
+	// Côté ancien ordinateur.
+	tracker  *discovery.Tracker
+	srcInv   *inventory.Inventory
+	invErr   error
+	invReady chan struct{}
 }
 
 // NewController prépare l'assistant.
@@ -113,7 +132,7 @@ func NewController() *Controller {
 	host, _ := os.Hostname()
 	return &Controller{
 		Port:    51516,
-		st:      State{Step: StepWelcome, Host: host},
+		st:      State{Step: StepRole, Host: host},
 		subs:    map[chan struct{}]struct{}{},
 		choices: make(chan migrate.Choices, 1),
 		quit:    make(chan struct{}),
@@ -199,7 +218,10 @@ func (c *Controller) begin() (context.Context, error) {
 		return nil, errors.New("une migration est déjà en cours")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel = cancel
+	c.cancel, c.ctx = cancel, ctx
+	// Un ordinateur en veille disparaît du réseau : la veille est bloquée
+	// tant que Bernard attend ou transfère.
+	c.lock = keepawake.Acquire("Bernard : migration en cours")
 	return ctx, nil
 }
 
@@ -209,7 +231,11 @@ func (c *Controller) end() {
 		c.cancel()
 		c.cancel = nil
 	}
+	c.ctx, c.tracker = nil, nil
+	lock := c.lock
+	c.lock = nil
 	c.mu.Unlock()
+	lock.Release()
 }
 
 // ---------------------------------------------------------------- réseau
@@ -268,9 +294,24 @@ func (c *Controller) StartNetwork() error {
 			return
 		}
 		c.update(func(s *State) { s.Peer, s.Code = first.PeerName, "" })
+		// Liaison perdue : un nouveau code est affiché, pour que l'ancien
+		// ordinateur puisse aussi reprendre après un arrêt volontaire (le code
+		// initial ne sert qu'une fois). Le journal vérifie qu'il s'agit bien
+		// de la même migration.
+		logf := func(msg string) {
+			c.log(msg)
+			switch msg {
+			case linkLostMsg:
+				if pairer.Renew() == nil {
+					c.update(func(s *State) { s.Code = pairer.Code() })
+				}
+			case linkBackMsg:
+				c.update(func(s *State) { s.Code = "" })
+			}
+		}
 		err = link.ReceiveWithReconnect(ctx, first, accept, func(ctx context.Context, cli *remote.Client) error {
 			return c.run(ctx, cli)
-		}, c.log)
+		}, logf)
 		if err != nil && ctx.Err() == nil {
 			c.fail(err)
 		}
@@ -352,6 +393,13 @@ func (c *Controller) run(ctx context.Context, src source.Source) error {
 			s.Step = StepAnalysing
 		}
 	})
+	announce := func(st remote.Status) {
+		if a, ok := src.(interface {
+			SendStatus(context.Context, remote.Status) error
+		}); ok {
+			a.SendStatus(ctx, st)
+		}
+	}
 	sess, err := migrate.Prepare(ctx, src)
 	if err != nil {
 		return err
@@ -381,6 +429,7 @@ func (c *Controller) run(ctx context.Context, src source.Source) error {
 			s.Step, s.Source, s.Users, s.Apps, s.Plan, s.Warnings = StepChoose, &src, users, apps, sess.Plan, sess.Warnings
 			s.NeedPass = migrate.MissingPasswords(sess, secrets)
 		})
+		announce(remote.Status{Phase: "choose"})
 		select {
 		case ch = <-c.choices:
 		case <-ctx.Done():
@@ -416,6 +465,7 @@ func (c *Controller) run(ctx context.Context, src source.Source) error {
 		Log: c.log,
 		Phase: func(ph string) {
 			c.update(func(s *State) { s.Progress.Phase = ph })
+			announce(remote.Status{Phase: ph, Planned: sess.Plan.Totals.Bytes})
 		},
 		Progress: func(p engine.Progress) {
 			c.update(func(s *State) {
@@ -474,8 +524,11 @@ func (c *Controller) Submit(ids map[string]bool, passwords map[string]string) er
 func (c *Controller) Stop() {
 	c.end()
 	c.update(func(s *State) {
-		if s.Step == StepRunning {
+		switch s.Step {
+		case StepRunning:
 			s.Step = StepStopped
+		case StepSrcSend:
+			s.Step = StepSrcStopped
 		}
 		s.Busy = false
 	})
@@ -492,7 +545,7 @@ func (c *Controller) Reset() {
 	}
 	c.mu.Unlock()
 	host := c.st.Host
-	c.update(func(s *State) { *s = State{Step: StepWelcome, Host: host} })
+	c.update(func(s *State) { *s = State{Step: StepRole, Host: host} })
 }
 
 // UndoMigration annule la migration terminée ou interrompue.

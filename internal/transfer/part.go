@@ -46,10 +46,20 @@ func OpenPart(path string, offset int64) (*os.File, int64, error) {
 	return f, offset, nil
 }
 
+// CommitPartNoSync fait comme CommitPart, sans synchroniser le dossier :
+// l'appelant groupe la synchronisation (syncfs) pour de nombreux fichiers.
+func CommitPartNoSync(part, dst, expectHash string, size int64, mode fs.FileMode, mtime time.Time) (FileResult, error) {
+	return commitPart(part, dst, expectHash, size, mode, mtime, false)
+}
+
 // CommitPart vérifie le fichier temporaire (relu depuis le disque) contre
 // l'empreinte annoncée par la source, applique droits et date, puis le place
 // sous son nom final sans jamais écraser.
 func CommitPart(part, dst, expectHash string, size int64, mode fs.FileMode, mtime time.Time) (FileResult, error) {
+	return commitPart(part, dst, expectHash, size, mode, mtime, true)
+}
+
+func commitPart(part, dst, expectHash string, size int64, mode fs.FileMode, mtime time.Time, sync bool) (FileResult, error) {
 	res := FileResult{Src: part, Hash: expectHash, Bytes: size}
 	got, n, err := HashFile(part)
 	if err != nil {
@@ -71,8 +81,10 @@ func CommitPart(part, dst, expectHash string, size int64, mode fs.FileMode, mtim
 	if status == StatusAlreadyPresent {
 		os.Remove(part)
 	}
-	if err := syncDir(filepath.Dir(final)); err != nil {
-		return res, err
+	if sync {
+		if err := syncDir(filepath.Dir(final)); err != nil {
+			return res, err
+		}
 	}
 	res.Dst, res.Status = final, status
 	return res, nil

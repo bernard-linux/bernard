@@ -91,6 +91,31 @@ func (j *Journal) Append(r Record) error {
 	return j.f.Sync()
 }
 
+// Write écrit un enregistrement sans attendre le disque. Il ne survit à une
+// coupure qu'après le prochain Sync (ou Append). Sert aux enregistrements
+// groupés : un seul passage sur le disque pour des centaines de petits
+// fichiers, au lieu d'un par fichier.
+func (j *Journal) Write(r Record) error {
+	if r.Time.IsZero() {
+		r.Time = time.Now().UTC()
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	_, err = j.f.Write(append(b, '\n'))
+	return err
+}
+
+// Sync rend durables les enregistrements écrits par Write.
+func (j *Journal) Sync() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.f.Sync()
+}
+
 // Close ferme le journal.
 func (j *Journal) Close() error { return j.f.Close() }
 

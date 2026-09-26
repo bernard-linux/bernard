@@ -44,10 +44,21 @@ function duration(sec) {
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+// Typographie française : espace insécable avant ; : ! ? » et après «.
+const NBSP = "\u00a0";
+const fr = str => String(str).replace(/ ([;:!?»])/g, NBSP + "$1").replace(/« /g, "«" + NBSP);
+function frTypo(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    if (n.parentElement?.closest(".cmd, pre, code")) continue;
+    n.nodeValue = fr(n.nodeValue);
+  }
+  return root;
+}
 function el(html) {
   const t = document.createElement("template");
   t.innerHTML = html.trim();
-  return t.content;
+  return frTypo(t.content);
 }
 
 async function api(path, body) {
@@ -72,7 +83,25 @@ function confirmBox(title, text, okLabel, danger) {
   return new Promise(res => d.addEventListener("close", () => res(d.returnValue === "ok"), { once: true }));
 }
 
+const RAILS = {
+  target: { steps: ["Source", "Connexion", "Analyse", "Choix", "Migration", "Bilan"],
+    note: "Rien n'est jamais modifié sur l'ancien ordinateur." },
+  source: { steps: ["Rôle", "Destination", "Connexion", "Envoi", "Terminé"],
+    note: "Rien n'est modifié sur cet ordinateur : ses données sont seulement lues." },
+  none: { steps: ["Bienvenue"], note: "Lancez Bernard sur les deux ordinateurs, dans l'ordre que vous voulez." },
+};
+let railKind = "";
 function setRail(n) {
+  const kind = state?.role || "none";
+  if (kind !== railKind) {
+    railKind = kind;
+    const r = RAILS[kind] || RAILS.none;
+    document.getElementById("steps").replaceChildren(...r.steps.map((label, i) => {
+      const li = document.createElement("li");
+      li.dataset.step = i + 1; li.textContent = label; return li;
+    }));
+    document.querySelector(".rail-note").textContent = r.note;
+  }
   document.querySelectorAll("#steps li").forEach(li => {
     const i = +li.dataset.step;
     li.classList.toggle("done", i < n);
@@ -88,7 +117,253 @@ function showError(msg, where) {
 
 // ------------------------------------------------------------ écrans
 
+const ICONS = {
+  target: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="8" width="36" height="24" rx="3"/><path d="M18 40h12M24 32v8"/><path d="M24 14v12M18 20l6 6 6-6"/></svg>`,
+  source: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="8" y="12" width="32" height="20" rx="3"/><path d="M4 38h40"/><path d="M24 28V16M18 22l6-6 6 6"/></svg>`,
+  network: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="10" width="16" height="12" rx="2"/><rect x="28" y="26" width="16" height="12" rx="2"/><path d="M12 22v10h16"/></svg>`,
+  disk: `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="8" y="12" width="32" height="24" rx="4"/><circle cx="33" cy="30" r="2"/><path d="M14 20h14"/></svg>`,
+};
+const PHASES = {
+  prepare: ["Préparation", "Bernard fait l'inventaire de cet ordinateur. Rien n'est modifié."],
+  analysing: ["Le nouvel ordinateur analyse vos données", "Il prépare la liste de ce qui peut être transféré."],
+  choose: ["Faites votre choix sur le nouvel ordinateur", "Cochez sur le nouvel ordinateur ce qui vient avec vous, puis lancez la migration. Cet ordinateur attend."],
+  system: ["Installation des comptes et des applications", "Le nouvel ordinateur installe vos applications. Cela peut prendre plusieurs minutes ; l'envoi des fichiers suit."],
+  copy: ["Envoi en cours", "Vous pouvez continuer à utiliser cet ordinateur, mais évitez de modifier des fichiers."],
+  settings: ["Derniers réglages", "Le nouvel ordinateur applique vos réglages. C'est presque fini."],
+};
+
+function speedOf(bytesNow) {
+  const now = Date.now();
+  speedSamples.push([now, bytesNow]);
+  speedSamples = speedSamples.filter(([t]) => now - t < 10000);
+  const [t0, b0] = speedSamples[0];
+  const span = (now - t0) / 1000;
+  return span >= 2 ? (bytesNow - b0) / span : 0;
+}
+
+function codeBoxes() {
+  return `<div class="code-entry" role="group" aria-label="Code à 6 chiffres">
+    ${[0, 1, 2].map(i => `<input inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off" aria-label="Chiffre ${i + 1}">`).join("")}
+    <span class="gap"></span>
+    ${[3, 4, 5].map(i => `<input inputmode="numeric" pattern="[0-9]" maxlength="1" autocomplete="off" aria-label="Chiffre ${i + 1}">`).join("")}
+  </div>`;
+}
+
+function wireCode(onFull) {
+  const boxes = [...main.querySelectorAll(".code-entry input")];
+  const value = () => boxes.map(b => b.value).join("");
+  boxes.forEach((b, i) => {
+    b.addEventListener("input", () => {
+      b.value = b.value.replace(/\D/g, "").slice(-1);
+      if (b.value && i < 5) boxes[i + 1].focus();
+      if (value().length === 6) onFull(value());
+    });
+    b.addEventListener("keydown", e => {
+      if (e.key === "Backspace" && !b.value && i > 0) { boxes[i - 1].focus(); boxes[i - 1].value = ""; }
+      if (e.key === "ArrowLeft" && i > 0) boxes[i - 1].focus();
+      if (e.key === "ArrowRight" && i < 5) boxes[i + 1].focus();
+    });
+    b.addEventListener("paste", e => {
+      const d = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      if (!d) return;
+      e.preventDefault();
+      d.split("").forEach((c, k) => { if (boxes[k]) boxes[k].value = c; });
+      boxes[Math.min(d.length, 5)].focus();
+      if (value().length === 6) onFull(value());
+    });
+  });
+  boxes[0].focus();
+  return { clear() { boxes.forEach(b => b.value = ""); boxes[0].focus(); }, set(disabled) { boxes.forEach(b => b.disabled = disabled); } };
+}
+
 const screens = {
+  role() {
+    setRail(1);
+    main.replaceChildren(el(`
+      <h1>Bienvenue dans Bernard</h1>
+      <p class="lead">Bernard déménage vos comptes, vos documents, vos réglages et vos applications
+      d'un ordinateur à l'autre. Ouvrez-le sur les deux ordinateurs, dans l'ordre que vous voulez.</p>
+      <div class="choices">
+        <button class="choice" data-role="target">${ICONS.target}
+          <div><strong>Ceci est le nouvel ordinateur</strong>
+          <span>Recevoir les données d'un ancien ordinateur ou d'un disque externe.</span></div>
+        </button>
+        <button class="choice" data-role="source">${ICONS.source}
+          <div><strong>Ceci est l'ancien ordinateur</strong>
+          <span>Envoyer ses données vers le nouvel ordinateur, ou les préparer sur un disque externe.
+          Rien n'y est modifié.</span></div>
+        </button>
+      </div>
+      <p class="form-error banner error" hidden></p>`));
+    main.querySelectorAll(".choice").forEach(b => b.addEventListener("click", async () => {
+      try { await api("role", { role: b.dataset.role }); } catch (e) { showError(e.message); }
+    }));
+  },
+
+  "src-home"() {
+    setRail(2);
+    main.replaceChildren(el(`
+      <h1>Transférer depuis cet ordinateur</h1>
+      <p class="lead">Comment voulez-vous transmettre vos données au nouvel ordinateur ?</p>
+      <div class="choices">
+        <button class="choice" data-mode="network">${ICONS.network}
+          <div><strong>Directement au nouvel ordinateur</strong>
+          <span>Par le Wi-Fi ou un câble réseau. Les deux ordinateurs doivent être allumés ; le nouveau peut être
+          encore en cours d'installation, cet ordinateur l'attendra.</span></div>
+        </button>
+        <button class="choice" data-mode="disk">${ICONS.disk}
+          <div><strong>Sur un disque externe</strong>
+          <span>Un paquet chiffré, à brancher ensuite sur le nouvel ordinateur. Utile sans réseau commun.</span></div>
+        </button>
+      </div>
+      <p class="form-error banner error" hidden></p>
+      <div class="bar"><span class="summary"></span><button data-act="reset" class="quiet">Revenir</button></div>`));
+    main.querySelectorAll(".choice").forEach(b => b.addEventListener("click", async () => {
+      try { await api("source", { mode: b.dataset.mode }); } catch (e) { showError(e.message); }
+    }));
+    main.querySelector("[data-act=reset]").addEventListener("click", () => api("reset"));
+  },
+
+  "src-wait"(s) {
+    setRail(2);
+    main.replaceChildren(el(`
+      <h1>En attente du nouvel ordinateur</h1>
+      <p class="lead">Sur le nouvel ordinateur, ouvrez Bernard, choisissez « Ceci est le nouvel ordinateur »
+      puis « Depuis un autre ordinateur ». Il apparaîtra ici tout seul.</p>
+      <div class="radar" aria-hidden="true">${ICONS.source}<span class="dots"><i></i><i></i><i></i></span>${ICONS.target}</div>
+      <p class="waiting"><span class="pulse"></span> <span id="w-text">Recherche sur le Wi-Fi et les câbles réseau…</span></p>
+      <p class="links-hint">Le nouvel ordinateur est encore en cours d'installation ? Aucun problème : cet ordinateur
+      l'attend aussi longtemps qu'il le faut, sans charger le réseau, et ne se mettra pas en veille.</p>
+      <p class="banner warn" id="w-hint" hidden>Toujours rien ? Vérifiez que les deux ordinateurs sont sur le même réseau.
+      Certains Wi-Fi (invités, entreprise) empêchent les appareils de se voir : reliez-les alors par un câble réseau.</p>
+      <p class="form-error banner error" hidden></p>
+      <div class="bar"><span class="summary"></span><button data-act="reset" class="quiet">Annuler</button></div>`));
+    main.querySelector("[data-act=reset]").addEventListener("click", () => api("reset"));
+    updateWait(s);
+  },
+
+  "src-code"(s) {
+    setRail(3);
+    main.replaceChildren(el(`
+      <h1>Nouvel ordinateur trouvé</h1>
+      <div id="targets"></div>
+      <p class="lead">Saisissez le code à 6 chiffres affiché sur le nouvel ordinateur.</p>
+      ${codeBoxes()}
+      <p class="waiting" id="c-busy" hidden><span class="pulse"></span> Connexion…</p>
+      <p class="form-error banner error" hidden></p>
+      <div class="bar"><span class="summary" id="c-inv"></span><button data-act="reset" class="quiet">Annuler</button></div>`));
+    main.querySelector("[data-act=reset]").addEventListener("click", () => api("reset"));
+    ui.code = wireCode(async code => {
+      try { ui.code.set(true); await api("pair", { target: ui.target || "", code }); }
+      catch (e) { showError(e.message); ui.code.set(false); ui.code.clear(); }
+    });
+    ui.targetsKey = "";
+    updateCode(s);
+  },
+
+  "src-send"(s) {
+    setRail(4);
+    main.replaceChildren(el(`
+      <h1 id="p-title"></h1>
+      <p class="lead" id="p-lead"></p>
+      <div id="link"></div>
+      <div id="p-copy">
+        <div class="tide" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><i></i></div>
+        <div class="figures">
+          <div><span>Envoyé</span><b id="f-bytes"></b></div>
+          <div><span>Débit</span><b id="f-speed"></b></div>
+          <div><span>Reste environ</span><b id="f-eta"></b></div>
+          <div><span>Liaison</span><b id="f-link"></b></div>
+        </div>
+        <p class="current-file" id="f-file"></p>
+      </div>
+      <p class="waiting" id="p-wait"><span class="pulse"></span> <span id="p-wait-text"></span></p>
+      <p class="links-hint" id="p-cable" hidden>Pour aller plus vite, branchez un câble réseau entre les deux ordinateurs
+      (ou vers la box) : Bernard basculera dessus tout seul, sans rien interrompre.</p>
+      <details><summary>Journal détaillé</summary><pre class="log" id="log"></pre></details>
+      <div class="bar"><span class="summary">Une coupure n'est pas grave : l'envoi reprend là où il s'était arrêté.</span>
+        <button data-act="stop" class="danger">Arrêter</button></div>`));
+    main.querySelector("[data-act=stop]").addEventListener("click", async () => {
+      if (await confirmBox("Arrêter l'envoi ?", "Ce qui est déjà arrivé et vérifié sur le nouvel ordinateur est conservé.", "Arrêter", true)) api("stop");
+    });
+    updateSend(s);
+  },
+
+  "src-disk"(s) {
+    setRail(2);
+    const disks = s.disks || [];
+    const inv = s.inventory;
+    main.replaceChildren(el(`
+      <h1>Préparer un disque externe</h1>
+      <p class="lead">Bernard y écrit un paquet chiffré avec vos comptes, documents, réglages et la liste de vos applications.</p>
+      ${disks.length ? `<div class="choices" id="disks">${disks.map((d, i) => `
+        <label class="choice disk"><input type="radio" name="disk" value="${esc(d.path)}" ${i === 0 ? "checked" : ""}>
+          <div><strong>${esc(d.label)}</strong><span>${bytes(d.free)} libres</span></div></label>`).join("")}</div>`
+        : `<p class="banner warn">Aucun disque externe détecté. Branchez un disque ou une clé USB, puis
+          <button class="link" data-act="refresh">cherchez à nouveau</button>.</p>`}
+      <p class="meta" id="d-need">${inv ? `Il faut environ ${bytes(inv.bytes)} d'espace libre.` : "Inventaire de cet ordinateur en cours…"}</p>
+      <label class="field">Phrase de passe (8 caractères au moins)
+        <input id="p1" type="password" autocomplete="new-password"></label>
+      <label class="field">Confirmation
+        <input id="p2" type="password" autocomplete="new-password"></label>
+      <p class="meta">Notez-la : elle sera demandée sur le nouvel ordinateur, et personne ne peut ouvrir le paquet sans elle.</p>
+      <p class="form-error banner error" hidden></p>
+      <div class="bar"><span class="summary"></span>
+        <button data-act="reset" class="quiet">Revenir</button>
+        <button data-act="go" class="primary" ${disks.length ? "" : "disabled"}>Écrire le paquet</button></div>`));
+    main.querySelector("[data-act=reset]").addEventListener("click", () => api("reset"));
+    main.querySelector("[data-act=refresh]")?.addEventListener("click", () => api("disks"));
+    main.querySelector("[data-act=go]").addEventListener("click", async () => {
+      const a = main.querySelector("#p1").value, b = main.querySelector("#p2").value;
+      if (a.length < 8) return showError("La phrase de passe doit faire au moins 8 caractères.");
+      if (a !== b) return showError("Les deux phrases de passe diffèrent.");
+      const disk = main.querySelector("input[name=disk]:checked")?.value;
+      try { await api("pack", { disk, passphrase: a }); } catch (e) { showError(e.message); }
+    });
+    ui.disksKey = JSON.stringify(disks.map(d => d.path));
+  },
+
+  "src-done"(s) {
+    setRail(5);
+    const p = s.send || {};
+    const disk = !!p.dest;
+    main.replaceChildren(el(`${disk ? `
+      <h1>Le paquet est prêt</h1>
+      <p class="lead">${plural(p.files || 0, "fichier écrit", "fichiers écrits")} (${bytes(p.bytes || 0)}), chiffrés.</p>
+      <ol class="howto">
+        <li><span>Éjectez le disque, puis branchez-le sur le nouvel ordinateur.</span></li>
+        <li><span>Ouvrez Bernard sur le nouvel ordinateur : « Ceci est le nouvel ordinateur », puis « Depuis un disque externe ».</span></li>
+        <li><span>Saisissez la phrase de passe choisie ici.</span></li>
+      </ol>
+      <p class="meta">Dossier : <span class="cmd">${esc(p.dest)}</span></p>
+      ${(p.errors || []).length ? `<details><summary>${p.errors.length} éléments non inclus</summary><pre class="log">${esc(p.errors.join("\n"))}</pre></details>` : ""}` : `
+      <h1>Transfert terminé</h1>
+      <p class="lead">Vos données sont arrivées sur ${esc(s.peer || "le nouvel ordinateur")}, et chaque fichier y a été vérifié.
+      Rien n'a été modifié sur cet ordinateur.</p>
+      <ul class="results"><li>${plural(p.files || 0, "fichier envoyé", "fichiers envoyés")} (${bytes(p.bytes || 0)})</li></ul>
+      <p>Gardez cet ordinateur tel quel tant que vous n'avez pas tout vérifié sur le nouveau.</p>`}
+      <div class="bar"><span class="summary"></span><button data-act="quit" class="primary">Fermer Bernard</button></div>`));
+    main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
+  },
+
+  "src-stopped"(s) {
+    setRail(4);
+    main.replaceChildren(el(`
+      <h1>Envoi interrompu</h1>
+      <p class="lead">Ce qui est déjà arrivé et vérifié sur le nouvel ordinateur ne sera pas renvoyé.</p>
+      ${s.error ? `<p class="banner error">${esc(s.error)}</p>` : ""}
+      <p>Pour reprendre, cliquez sur « Reprendre » : Bernard retrouvera le nouvel ordinateur, qui affiche un
+      nouveau code. Si Bernard y a été fermé entre-temps, rouvrez-le d'abord (« Depuis un autre ordinateur »).
+      La migration continuera là où elle s'était arrêtée.</p>
+      <div class="bar"><span class="summary"></span>
+        <button data-act="quit" class="quiet">Fermer Bernard</button>
+        <button data-act="again" class="primary">Reprendre</button></div>`));
+    main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
+    main.querySelector("[data-act=again]").addEventListener("click", async () => {
+      try { await api("source", { mode: "network" }); } catch (e) { alert(e.message); }
+    });
+  },
+
   welcome() {
     setRail(1);
     main.replaceChildren(el(`
@@ -107,10 +382,12 @@ const screens = {
           <span>Vous avez déjà préparé un paquet Bernard sur un disque ou une clé USB.</span></div>
         </button>
       </div>
-      <p class="form-error banner error" hidden></p>`));
+      <p class="form-error banner error" hidden></p>
+      <div class="bar"><span class="summary"></span><button data-act="reset" class="quiet">Revenir</button></div>`));
     main.querySelectorAll(".choice").forEach(b => b.addEventListener("click", async () => {
       try { await api("start", { mode: b.dataset.mode }); } catch (e) { showError(e.message); }
     }));
+    main.querySelector("[data-act=reset]").addEventListener("click", () => api("reset"));
   },
 
   network(s) {
@@ -120,9 +397,9 @@ const screens = {
       <h1>Reliez l'ancien ordinateur</h1>
       <p class="lead">Les deux ordinateurs doivent être sur le même réseau, ou reliés par un câble.</p>
       <ol class="howto">
-        <li><span>Sur l'ancien ordinateur, ouvrez un terminal et lancez
-          <span class="cmd">sudo bernard-agent connect</span></span></li>
-        <li><span>Quand il vous le demande, saisissez ce code :</span></li>
+        <li><span>Sur l'ancien ordinateur, ouvrez Bernard et choisissez « Ceci est l'ancien ordinateur »,
+          puis « Directement au nouvel ordinateur ».</span></li>
+        <li><span>Il trouvera cet ordinateur tout seul et vous demandera ce code :</span></li>
       </ol>
       <div class="code" aria-label="Code d'appairage ${esc(c.split("").join(" "))}">
         ${c.slice(0, 3).split("").map(d => `<b>${esc(d)}</b>`).join("")}<span class="gap"></span>
@@ -133,7 +410,7 @@ const screens = {
       que si les deux ordinateurs ont un port Thunderbolt ou USB4. Vous pourrez changer de liaison pendant le transfert.</p>
       <details><summary>La recherche automatique ne trouve pas cet ordinateur ?</summary>
         <p>Certains Wi-Fi (invités, entreprise) empêchent les appareils de se voir. Reliez les deux ordinateurs
-        par un câble, ou indiquez l'adresse à la main sur l'ancien ordinateur :</p>
+        par un câble. En dernier recours, dans un terminal sur l'ancien ordinateur :</p>
         <p class="addresses">${(s.addresses || []).map(a => `<span class="cmd">sudo bernard-agent connect --target ${esc(a)}</span>`).join("<br>") || "Aucune adresse réseau active."}</p>
       </details>
       <div class="bar"><span class="summary"></span><button data-act="reset" class="quiet">Revenir</button></div>`));
@@ -214,7 +491,7 @@ const screens = {
         <span class="meta"> ${a.reason === "snapInfrastructure" ? "composant technique, inutile ici" : "déjà installé"}</span></span><span></span></li>`).join("")}</ul>` : ""}
 
       ${net.length ? `<h2>Réseau et imprimantes</h2><ul class="list">${net.map(a => a.op === "importWifi"
-        ? row(a, `Wi-Fi « ${esc(a.label)} »`, "Le mot de passe du réseau est repris.")
+        ? row(a, `Wi-Fi « ${esc(a.label)} »`, "Le mot de passe du réseau est repris.")
         : row(a, `Imprimante ${esc(a.label)}`, "Réinstallée automatiquement si c'est une imprimante réseau ; une imprimante USB sera à rebrancher.")).join("")}</ul>` : ""}
 
       ${(s.warnings || []).map(w => `<p class="banner warn">${esc(w)}</p>`).join("")}
@@ -273,6 +550,7 @@ const screens = {
     main.querySelector("[data-act=stop]").addEventListener("click", async () => {
       if (await confirmBox("Arrêter la migration ?", "Ce qui est déjà copié et vérifié est conservé. Pour reprendre, relancez Bernard sur les deux ordinateurs.", "Arrêter", true)) api("stop");
     });
+    ui.lostKey = null;
     updateRunning(s);
   },
 
@@ -331,8 +609,8 @@ const screens = {
       <h1>Migration interrompue</h1>
       <p class="lead">Ce qui a été copié et vérifié est conservé. Rien ne sera recopié.</p>
       ${s.error ? `<p class="banner error">${esc(s.error)}</p>` : ""}
-      <p>Pour reprendre : fermez Bernard, relancez-le ici, puis relancez <span class="cmd">sudo bernard-agent connect</span>
-      sur l'ancien ordinateur. La migration continuera là où elle s'était arrêtée.</p>
+      <p>Pour reprendre : fermez Bernard, relancez-le ici (« Depuis un autre ordinateur »), puis sur l'ancien
+      ordinateur cliquez sur « Reprendre ». La migration continuera là où elle s'était arrêtée.</p>
       <div class="bar"><span class="summary"></span><button data-act="quit" class="primary">Fermer Bernard</button></div>`));
     main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
   },
@@ -407,9 +685,9 @@ function updateSummary(s) {
   }
   const free = p.target.freeBytes;
   const over = need > free * 0.95;
-  main.querySelector("#sum-text").textContent =
+  main.querySelector("#sum-text").textContent = fr(
     `À copier : ${bytes(need)} sur ${bytes(free)} libres. ` +
-    (apps ? `${plural(apps, "application", "applications")} à installer.` : "Aucune application à installer.");
+    (apps ? `${plural(apps, "application", "applications")} à installer.` : "Aucune application à installer."));
   const sp = main.querySelector("#space");
   sp.classList.toggle("over", over);
   sp.querySelector("i").style.width = Math.min(100, free ? need / free * 100 : 100) + "%";
@@ -445,23 +723,86 @@ function updateRunning(s) {
   bar.setAttribute("aria-valuenow", Math.round(pct));
   main.querySelector("#f-phase").textContent = { system: "Comptes et applications", settings: "Réglages" }[p.phase] || "Copie des fichiers";
   main.querySelector("#f-bytes").textContent = `${bytes(p.bytes || 0)} / ${bytes(p.planned || 0)}`;
-  const now = Date.now();
-  speedSamples.push([now, p.bytes || 0]);
-  speedSamples = speedSamples.filter(([t]) => now - t < 10000);
   // Débit mesuré sur les 10 dernières secondes ; rien d'affiché tant que
   // la mesure n'est pas significative.
-  const [t0, b0] = speedSamples[0];
-  const span = (now - t0) / 1000;
-  const speed = span >= 2 ? ((p.bytes || 0) - b0) / span : 0;
-  main.querySelector("#f-speed").textContent = speed > 1000 ? bytes(speed) + "/s" : "mesure…";
-  const rest = speed > 1000 ? ((p.planned || 0) - (p.bytes || 0)) / speed : 0;
+  const speed = speedOf(p.bytes || 0);
+  main.querySelector("#f-speed").textContent = p.linkLost ? "en pause" : speed > 1000 ? bytes(speed) + "/s" : "mesure…";
+  const rest = speed > 1000 && !p.linkLost ? ((p.planned || 0) - (p.bytes || 0)) / speed : 0;
   main.querySelector("#f-eta").textContent = rest > 0 ? duration(rest) : "—";
   main.querySelector("#f-file").textContent = p.rel || "";
-  main.querySelector("#link").replaceChildren(p.linkLost
-    ? el(`<p class="banner warn">Liaison perdue. Bernard attend l'ancien ordinateur par une autre liaison (câble ou Wi-Fi) ; le transfert reprendra seul.</p>`)
-    : el(""));
+  const lostKey = p.linkLost ? "lost" + (s.code || "") : "";
+  if (ui.lostKey !== lostKey) {
+    ui.lostKey = lostKey;
+    main.querySelector("#link").replaceChildren(p.linkLost
+      ? el(`<div class="banner warn"><p>Liaison perdue. Bernard attend l'ancien ordinateur par une autre liaison (câble ou Wi-Fi) ; le transfert reprendra seul.</p>
+        ${s.code ? `<p>Si l'envoi a été arrêté sur l'ancien ordinateur, cliquez-y sur « Reprendre » et saisissez ce code :</p>
+        <div class="code small">${s.code.slice(0, 3).split("").map(d => `<b>${esc(d)}</b>`).join("")}<span class="gap"></span>${s.code.slice(3).split("").map(d => `<b>${esc(d)}</b>`).join("")}</div>` : ""}</div>`)
+      : el(""));
+  }
   const log = main.querySelector("#log");
   log.textContent = (s.log || []).join("\n");
+}
+
+function updateWait(s) {
+  const t = main.querySelector("#w-text");
+  if (!t) return;
+  const w = s.waited || 0;
+  t.textContent = w < 60 ? "Recherche sur le Wi-Fi et les câbles réseau…" : `En attente depuis ${duration(w)}…`;
+  main.querySelector("#w-hint").hidden = w < 300;
+}
+
+function updateCode(s) {
+  const ts = s.targets || [];
+  const key = JSON.stringify(ts);
+  if (key !== ui.targetsKey) {
+    ui.targetsKey = key;
+    if (!ts.some(t => t.id === ui.target)) ui.target = ts[0]?.id || "";
+    const box = main.querySelector("#targets");
+    box.replaceChildren(el(ts.length > 1 ? `<p>Plusieurs nouveaux ordinateurs sont visibles : choisissez le vôtre.</p>
+      <div class="choices targets">${ts.map(t => `<label class="choice disk"><input type="radio" name="target" value="${esc(t.id)}" ${t.id === ui.target ? "checked" : ""}>
+      <div><strong>${esc(t.name)}</strong><span>par ${esc(t.link)}</span></div></label>`).join("")}</div>`
+      : ts.length ? `<p class="found">${ICONS.target}<span><strong>${esc(ts[0].name)}</strong><br><span class="meta">par ${esc(ts[0].link)}</span></span></p>` : ""));
+    box.querySelectorAll("input[name=target]").forEach(r => r.addEventListener("change", () => { ui.target = r.value; }));
+  }
+  main.querySelector("#c-busy").hidden = !s.busy;
+  ui.code?.set(!!s.busy);
+  const inv = s.inventory;
+  main.querySelector("#c-inv").textContent = inv
+    ? `Cet ordinateur : ${plural(inv.users, "compte", "comptes")}, ${plural(inv.apps, "application", "applications")}, ${bytes(inv.bytes)} de données.`
+    : "Inventaire de cet ordinateur en cours…";
+  if (!s.busy && s.error && ui.lastError !== s.error) { ui.lastError = s.error; ui.code?.clear(); }
+  if (!s.error) ui.lastError = "";
+}
+
+function updateSend(s) {
+  const p = s.send || {};
+  const disk = !!p.dest;
+  const [title, lead] = disk
+    ? (p.phase === "prepare" ? PHASES.prepare : ["Écriture du paquet", "Vous pouvez continuer à utiliser cet ordinateur. Ne débranchez pas le disque."])
+    : (PHASES[p.phase] || PHASES.copy);
+  main.querySelector("#p-title").textContent = fr(title);
+  main.querySelector("#p-lead").textContent = fr(lead);
+  const copying = p.phase === "copy" || (p.bytes || 0) > 0;
+  main.querySelector("#p-copy").hidden = !copying;
+  main.querySelector("#p-wait").hidden = copying;
+  main.querySelector("#p-wait-text").textContent = p.phase === "system" ? "Installation sur le nouvel ordinateur…" : "Patientez…";
+  const planned = p.planned || 0;
+  const pct = planned ? Math.min(100, (p.bytes || 0) / planned * 100) : 0;
+  const bar = main.querySelector("#bar");
+  bar.querySelector("i").style.width = pct.toFixed(1) + "%";
+  bar.setAttribute("aria-valuenow", Math.round(pct));
+  main.querySelector("#f-bytes").textContent = planned ? `${bytes(p.bytes || 0)} / ${bytes(planned)}` : bytes(p.bytes || 0);
+  const speed = copying ? speedOf(p.bytes || 0) : 0;
+  main.querySelector("#f-speed").textContent = p.linkLost ? "en pause" : speed > 1000 ? bytes(speed) + "/s" : "mesure…";
+  const rest = speed > 1000 && planned && !p.linkLost ? (planned - (p.bytes || 0)) / speed : 0;
+  main.querySelector("#f-eta").textContent = rest > 0 ? duration(rest) : "—";
+  main.querySelector("#f-link").textContent = p.link ? p.link.charAt(0).toUpperCase() + p.link.slice(1) : "—";
+  main.querySelector("#f-file").textContent = p.rel || "";
+  main.querySelector("#p-cable").hidden = disk || p.link !== "Wi-Fi";
+  main.querySelector("#link").replaceChildren(p.linkLost
+    ? el(`<p class="banner warn">Liaison perdue. Bernard cherche le nouvel ordinateur par une autre liaison (câble ou Wi-Fi) ; l'envoi reprendra seul.</p>`)
+    : el(""));
+  main.querySelector("#log").textContent = (s.log || []).join("\n");
 }
 
 function renderUndo(s) {
@@ -483,7 +824,7 @@ function render(s) {
   if (s.step !== shown) {
     shown = s.step;
     speedSamples = [];
-    (screens[s.step] || screens.welcome)(s);
+    (screens[s.step] || screens.role)(s);
     main.focus();
   } else if (s.step === "running") {
     updateRunning(s);
@@ -492,6 +833,15 @@ function render(s) {
     if (codeNow !== s.code) screens.network(s);
   } else if (s.step === "report" && s.undo && !main.querySelector("#undo .banner")) {
     screens.report(s);
+  } else if (s.step === "src-wait") {
+    updateWait(s);
+  } else if (s.step === "src-code") {
+    updateCode(s);
+  } else if (s.step === "src-send") {
+    updateSend(s);
+  } else if (s.step === "src-disk") {
+    if (JSON.stringify((s.disks || []).map(d => d.path)) !== ui.disksKey) screens["src-disk"](s);
+    else if (s.inventory) main.querySelector("#d-need").textContent = `Il faut environ ${bytes(s.inventory.bytes)} d'espace libre.`;
   }
   if (s.error && s.step !== "stopped") showError(s.error);
 }

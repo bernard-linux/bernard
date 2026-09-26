@@ -274,3 +274,117 @@ func TestUndoRemovesOnlyWhatBernardCreated(t *testing.T) {
 		t.Errorf("attendu 1 fichier conservé, obtenu %v", rep.Kept)
 	}
 }
+
+// manySmall crée beaucoup de petits fichiers, un gros au milieu.
+func manySmall(t *testing.T, n int) (*inventory.Inventory, string) {
+	home := t.TempDir()
+	for i := 0; i < n; i++ {
+		write(t, filepath.Join(home, "d"+string(rune('a'+i%5)), "f"+strings.Repeat("x", i%7)+string(rune('A'+i%26))+itoa(i)), random(500+i%3000))
+		if i == n/2 {
+			write(t, filepath.Join(home, "c", "gros.bin"), random(3<<20))
+		}
+	}
+	inv := &inventory.Inventory{
+		Schema:   inventory.Schema,
+		Source:   inventory.Source{OS: "linux", Hostname: "ancien-pc"},
+		Users:    []inventory.User{{ID: "u1", Login: "a", Home: home}},
+		DataSets: []inventory.DataSet{{ID: "d1", User: "u1", Kind: "home", Path: home}},
+	}
+	return inv, home
+}
+
+func itoa(i int) string {
+	b := []byte{}
+	for {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+		if i == 0 {
+			return string(b)
+		}
+	}
+}
+
+// Coupure au milieu d'un lot de petits fichiers, puis reprise : tout arrive,
+// vérifié, sans doublon ni fichier temporaire.
+func TestResumeAfterCutInSmallFiles(t *testing.T) {
+	for _, cut := range []int64{20 << 10, 300 << 10, 2 << 20} {
+		inv, home := manySmall(t, 600)
+		dst := filepath.Join(t.TempDir(), "a")
+		jpath := filepath.Join(t.TempDir(), "journal.jsonl")
+		cli := connect(t, inv, cut)
+		if _, err := runCopy(t, cli, jpath, dst); err == nil {
+			t.Fatalf("coupure à %d : la session aurait dû s'interrompre", cut)
+		}
+		cli.RW.Close()
+		cli2 := connect(t, inv, 0)
+		rep, err := runCopy(t, cli2, jpath, dst)
+		cli2.Close()
+		if err != nil || !rep.OK() {
+			t.Fatalf("coupure à %d : reprise échouée : %v %+v", cut, err, rep.Errors)
+		}
+		sameTree(t, home, dst)
+		filepath.Walk(dst, func(p string, _ os.FileInfo, _ error) error {
+			if strings.Contains(p, "(bernard") || strings.HasSuffix(p, ".part") {
+				t.Errorf("coupure à %d : reste %s", cut, p)
+			}
+			return nil
+		})
+		// Troisième passage : rien à recopier.
+		cli3 := connect(t, inv, 0)
+		rep, err = runCopy(t, cli3, jpath, dst)
+		cli3.Close()
+		if err != nil || rep.Files != 0 {
+			t.Errorf("coupure à %d : %d fichiers recopiés alors que tout était là (%v)", cut, rep.Files, err)
+		}
+	}
+}
+
+// Undo après une migration par lots : tout ce qui a été créé est retiré.
+func TestUndoAfterBatchedCopy(t *testing.T) {
+	inv, _ := manySmall(t, 300)
+	dst := filepath.Join(t.TempDir(), "a")
+	jpath := filepath.Join(t.TempDir(), "journal.jsonl")
+	cli := connect(t, inv, 0)
+	if rep, err := runCopy(t, cli, jpath, dst); err != nil || !rep.OK() {
+		t.Fatal(err)
+	}
+	cli.Close()
+	if _, err := Undo(jpath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		var left []string
+		filepath.Walk(dst, func(p string, _ os.FileInfo, _ error) error { left = append(left, p); return nil })
+		t.Errorf("restes après annulation : %v", left)
+	}
+}
+
+// Demandes d'avance dont certaines ne sont jamais lues (fichier sauté) :
+// le protocole reste aligné.
+func TestPrefetchSkipped(t *testing.T) {
+	inv, home := sourceTree(t)
+	cli := connect(t, inv, 0)
+	defer cli.Close()
+	ctx := context.Background()
+	cli.Prefetch("d1", "Documents/rapport été.odt", 0)
+	cli.Prefetch("d1", "Documents/😀 photo.jpg", 0)
+	cli.Prefetch("d1", "vide.txt", 0)
+	st, err := cli.Get(ctx, "d1", "vide.txt", 0) // les deux premiers sont sautés
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = cli.Get(ctx, "d1", "Documents/rapport été.odt", 0) // plus en attente : redemandé
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(st)
+	if want, _ := os.ReadFile(filepath.Join(home, "Documents/rapport été.odt")); string(b) != string(want) {
+		t.Fatalf("contenu inattendu : %q", b)
+	}
+	if _, err := cli.Inventory(ctx); err != nil {
+		t.Fatalf("protocole désaligné : %v", err)
+	}
+}

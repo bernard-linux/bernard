@@ -100,6 +100,7 @@ const (
 	MsgDone      = "done"      // fin de fichier (Hash) ou fin de liste
 	MsgSecrets   = "secrets"   // hachages des mots de passe (Body = login → hachage)
 	MsgExtras    = "extras"    // réglages lus en administrateur (Body = settings.Extras)
+	MsgStatus    = "status"    // étape annoncée par le moteur (Body = remote.Status)
 	MsgError     = "error"
 	MsgBye       = "bye"
 )

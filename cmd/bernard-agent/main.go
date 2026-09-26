@@ -14,14 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/agent"
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/keepawake"
-	"github.com/bernard-linux/bernard/internal/link"
 	"github.com/bernard-linux/bernard/internal/pack"
 	"github.com/bernard-linux/bernard/internal/remote"
-	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/version"
 )
@@ -75,7 +74,7 @@ var sourceRoot = "/"
 
 func collect(ctx context.Context, noData bool) (*inventory.Inventory, error) {
 	fmt.Fprintln(os.Stderr, "Inventaire en cours (lecture seule)…")
-	return linux.Collect(ctx, linux.Options{Root: sourceRoot, SkipData: noData, AgentVersion: version.Version})
+	return agent.Collect(ctx, sourceRoot, noData)
 }
 
 func runInventory(ctx context.Context, args []string) int {
@@ -117,33 +116,19 @@ func printInventory(inv *inventory.Inventory) {
 	}
 }
 
-var linkNames = map[string]string{
-	discovery.LinkThunderbolt: "câble Thunderbolt / USB4",
-	discovery.LinkEthernet:    "câble réseau (RJ45)",
-	discovery.LinkWifi:        "Wi-Fi",
-	discovery.LinkOther:       "réseau",
-}
-
-func describe(r discovery.Route) string {
-	s := linkNames[r.Link]
-	if r.Speed > 0 {
-		s += fmt.Sprintf(", %d Mb/s", r.Speed)
-	}
-	return s
-}
-
 func ask(prompt string) string {
 	fmt.Print(prompt)
 	line, _ := stdin.ReadString('\n')
 	return strings.TrimSpace(line)
 }
 
-// chooseTarget renvoie l'adresse et l'identifiant de la cible choisie.
-func chooseTarget(ctx context.Context) (string, string, error) {
+// chooseTarget attend le nouvel ordinateur (sans limite) et renvoie son
+// adresse et son identifiant.
+func chooseTarget(ctx context.Context, tr *discovery.Tracker) (string, string, error) {
 	fmt.Println("En attente du nouvel ordinateur (Wi-Fi, câble réseau, Thunderbolt)…")
 	fmt.Println("Ouvrez Bernard sur le nouvel ordinateur, maintenant ou plus tard : cet ordinateur l'attendra")
 	fmt.Println("aussi longtemps qu'il le faut, sans charger le réseau. Ctrl+C pour abandonner.")
-	targets, err := discovery.Wait(ctx, 0, func(d time.Duration) {
+	targets, err := tr.Wait(ctx, func(d time.Duration) {
 		fmt.Printf("  toujours en attente (%s)…\n", humanDuration(d))
 		if d >= 5*time.Minute && d < 6*time.Minute {
 			fmt.Println("  Si Bernard est déjà ouvert sur le nouvel ordinateur : les deux sont-ils sur le même réseau ?")
@@ -159,14 +144,13 @@ func chooseTarget(ctx context.Context) (string, string, error) {
 		}
 		return "", "", err
 	}
-	switch len(targets) {
-	case 1:
+	if len(targets) == 1 {
 		t := targets[0]
-		fmt.Printf("Trouvé : %s, par %s\n", t.Name, describe(t.Best()))
+		fmt.Printf("Trouvé : %s, par %s\n", t.Name, agent.Describe(t.Best()))
 		return t.Best().Addr, t.ID, nil
 	}
 	for i, t := range targets {
-		fmt.Printf("  %d. %s (%s)\n", i+1, t.Name, describe(t.Best()))
+		fmt.Printf("  %d. %s (%s)\n", i+1, t.Name, agent.Describe(t.Best()))
 	}
 	n, err := strconv.Atoi(ask("Numéro de l'ordinateur : "))
 	if err != nil || n < 1 || n > len(targets) {
@@ -196,14 +180,20 @@ func runConnect(ctx context.Context, args []string) int {
 		fmt.Println("Remarque : impossible de bloquer la mise en veille ; désactivez-la le temps de la migration.")
 	}
 
+	// Une seule écoute des balises : attente, reconnexion, câble branché.
+	tr, err := discovery.Track(ctx, 0)
+	if err != nil && *target == "" {
+		fmt.Fprintln(os.Stderr, "Écoute du réseau impossible (Bernard est-il déjà ouvert sur cet ordinateur ?) :", err)
+		return 1
+	}
+
 	addr, targetID := *target, ""
 	if addr == "" {
 		wctx, cancel := ctx, context.CancelFunc(func() {})
 		if *timeout > 0 {
 			wctx, cancel = context.WithTimeout(ctx, *timeout)
 		}
-		var err error
-		addr, targetID, err = chooseTarget(wctx)
+		addr, targetID, err = chooseTarget(wctx, tr)
 		cancel()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -224,51 +214,37 @@ func runConnect(ctx context.Context, args []string) int {
 	if code == "" {
 		code = ask("Code affiché sur le nouvel ordinateur : ")
 	}
-	host, _ := os.Hostname()
-	conn, err := session.Dial(ctx, addr, strings.ReplaceAll(code, " ", ""), host)
+	conn, err := agent.Pair(ctx, addr, strings.ReplaceAll(code, " ", ""))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Appairage impossible :", err)
 		return 1
 	}
 	fmt.Printf("Connecté à %s. Transfert en cours — laissez cette fenêtre ouverte.\n", conn.PeerName)
-	fmt.Println("Vous pouvez changer de liaison (débrancher le câble, passer en Wi-Fi) : le transfert reprendra seul.")
+	fmt.Println("Vous pouvez brancher un câble réseau à tout moment : le transfert basculera dessus de lui-même.")
 
 	var files, bytes int64
-	srv := &remote.Server{Inv: inv, OnFile: func(rel string, n int64) {
+	var lastPrint time.Time
+	srv := agent.NewServer(ctx, inv, sourceRoot, func(rel string, n int64) {
 		files++
+	}, func(rel string, n int64) {
 		bytes += n
-		if files%200 == 0 {
+		if time.Since(lastPrint) > 5*time.Second {
+			lastPrint = time.Now()
 			fmt.Printf("  %d fichiers envoyés (%s)\n", files, humanBytes(bytes))
 		}
-	}}
-	if os.Geteuid() == 0 {
-		var logins []string
-		for _, u := range inv.Users {
-			logins = append(logins, u.Login)
-		}
-		srv.Secrets = func() (map[string]string, error) { return linux.ReadPasswordHashes(sourceRoot, logins) }
-		srv.Extras = func() (any, error) {
-			return linux.CollectExtras(ctx, sourceRoot, inv.Source.Desktop, inv.Users, sysexec.Run), nil
-		}
-	}
-
-	// Adresses possibles pour se reconnecter : la cible réannoncée par ses
-	// balises (toutes liaisons, la meilleure d'abord), puis l'adresse initiale.
-	routes := func(ctx context.Context) []string {
-		var out []string
-		if targetID != "" {
-			found, _ := discovery.Listen(ctx, 0, 3*time.Second)
-			for _, t := range found {
-				if t.ID == targetID {
-					for _, r := range t.Routes {
-						out = append(out, r.Addr)
-					}
-				}
+	}, func(st remote.Status) {
+		switch st.Phase {
+		case "system":
+			fmt.Println("Le nouvel ordinateur installe les comptes et les applications…")
+		case "copy":
+			if st.Planned > 0 {
+				fmt.Printf("Copie des fichiers : %s à envoyer.\n", humanBytes(st.Planned))
 			}
+		case "settings":
+			fmt.Println("Le nouvel ordinateur applique les réglages…")
 		}
-		return append(out, addr)
-	}
-	err = link.ServeWithReconnect(ctx, conn, srv, routes, host, func(msg string) { fmt.Println(msg) })
+	})
+	err = agent.Serve(ctx, conn, srv, tr, targetID, addr, func(msg string) { fmt.Println(msg) }, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Transfert interrompu après %d fichiers : %v\n", files, err)
 		fmt.Fprintln(os.Stderr, "Relancez la commande (un nouveau code sera demandé) : rien de ce qui est vérifié ne sera renvoyé.")

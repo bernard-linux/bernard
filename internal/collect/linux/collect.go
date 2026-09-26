@@ -23,6 +23,10 @@ type Options struct {
 	SkipData bool
 	// AgentVersion est inscrite dans l'inventaire.
 	AgentVersion string
+	// Offline lit les applications et imprimantes dans les fichiers de Root
+	// au lieu d'interroger les commandes : Root est un système qui ne tourne
+	// pas (disque d'un ancien PC monté ailleurs).
+	Offline bool
 }
 
 // Collect produit l'inventaire de la machine source. Une information
@@ -49,12 +53,19 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	}
 	inv.Users = users
 
+	offline := opt.Offline
+	if offline {
+		inv.Apps = offlineApps(opt.Root)
+	}
 	for _, src := range []struct {
 		label string
 		fn    func(context.Context, Runner) ([]inventory.App, error)
 	}{
 		{"apt", aptApps}, {"Flatpak", flatpakApps}, {"Snap", snapApps},
 	} {
+		if offline {
+			break
+		}
 		apps, err := src.fn(ctx, opt.Runner)
 		switch {
 		case errors.Is(err, ErrMissingCommand):
@@ -68,14 +79,16 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 		inv.Apps[i].ID = "a" + strconv.Itoa(i+1)
 	}
 
-	if wifi := wifiFromFiles(opt.Root); len(wifi) > 0 {
+	if wifi := wifiFromFiles(opt.Root); len(wifi) > 0 || offline {
 		inv.Network.Wifi = wifi
 	} else if wifi, err := wifiNetworks(ctx, opt.Runner); err == nil {
 		inv.Network.Wifi = wifi
 	} else if !errors.Is(err, ErrMissingCommand) {
 		warn("réseaux Wi-Fi non inventoriés : %v", err)
 	}
-	if pr, err := printers(ctx, opt.Runner); err == nil {
+	if offline {
+		inv.Network.Printers = offlinePrinters(opt.Root)
+	} else if pr, err := printers(ctx, opt.Runner); err == nil {
 		inv.Network.Printers = pr
 	} else if !errors.Is(err, ErrMissingCommand) {
 		warn("imprimantes non inventoriées : %v", err)

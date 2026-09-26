@@ -7,11 +7,13 @@
 package remote
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/zeebo/blake3"
 
@@ -26,10 +28,23 @@ type Server struct {
 	Inv *inventory.Inventory
 	// OnFile est appelé après chaque fichier envoyé (progression côté source).
 	OnFile func(rel string, bytes int64)
+	// OnBytes est appelé à chaque bloc envoyé, pour une progression fluide
+	// pendant les gros fichiers.
+	OnBytes func(rel string, n int64)
 	// Secrets fournit les hachages de mots de passe, si l'agent peut les lire.
 	Secrets func() (map[string]string, error)
 	// Extras fournit les réglages lus en administrateur (Wi-Fi, bureau…).
 	Extras func() (any, error)
+	// OnStatus reçoit l'état annoncé par le nouvel ordinateur (étape en
+	// cours, volume prévu), pour l'afficher côté source.
+	OnStatus func(Status)
+}
+
+// Status est l'état que le moteur annonce à l'agent.
+type Status struct {
+	Phase   string `json:"phase"`             // analysing, system, copy, settings, done
+	Planned int64  `json:"planned,omitempty"` // octets à copier
+	Files   int64  `json:"files,omitempty"`   // fichiers à copier
 }
 
 func (s *Server) dataset(id string) (inventory.DataSet, error) {
@@ -42,10 +57,26 @@ func (s *Server) dataset(id string) (inventory.DataSet, error) {
 }
 
 // Serve traite les demandes jusqu'au message de fin ou à la coupure.
-func (s *Server) Serve(ctx context.Context, rw io.ReadWriter) error {
+//
+// Les réponses sont mises en tampon et envoyées d'un bloc tant que d'autres
+// demandes attendent déjà (le moteur en envoie plusieurs d'avance) : des
+// centaines de petits fichiers partent en quelques paquets réseau.
+func (s *Server) Serve(ctx context.Context, conn io.ReadWriter) error {
+	br := bufio.NewReaderSize(conn, 64<<10)
+	bw := bufio.NewWriterSize(conn, 256<<10)
+	defer bw.Flush()
+	rw := struct {
+		io.Reader
+		io.Writer
+	}{br, bw}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if br.Buffered() == 0 {
+			if err := bw.Flush(); err != nil {
+				return err
+			}
 		}
 		var m wire.Msg
 		if err := wire.ReadJSON(rw, &m); err != nil {
@@ -66,7 +97,16 @@ func (s *Server) Serve(ctx context.Context, rw io.ReadWriter) error {
 			err = s.list(rw, m.Dataset)
 		case wire.MsgGet:
 			err = s.get(rw, m.Dataset, m.Rel, m.Offset)
+		case wire.MsgStatus:
+			var st Status
+			if json.Unmarshal(m.Body, &st) == nil && s.OnStatus != nil {
+				s.OnStatus(st)
+			}
+			err = wire.WriteJSON(rw, wire.Msg{Type: wire.MsgDone})
 		case wire.MsgBye:
+			if s.OnStatus != nil {
+				s.OnStatus(Status{Phase: "done"})
+			}
 			return nil
 		default:
 			err = wire.WriteJSON(rw, wire.Msg{Type: wire.MsgError, Error: "demande inconnue : " + m.Type})
@@ -155,7 +195,9 @@ func (s *Server) get(w io.Writer, id, rel string, offset int64) error {
 	if _, err := io.CopyN(h, f, offset); err != nil {
 		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Rel: rel, Error: err.Error()})
 	}
-	buf := make([]byte, wire.ChunkSize)
+	bp := chunkPool.Get().(*[]byte)
+	defer chunkPool.Put(bp)
+	buf := *bp
 	var sent int64
 	for {
 		n, rerr := f.Read(buf)
@@ -165,6 +207,9 @@ func (s *Server) get(w io.Writer, id, rel string, offset int64) error {
 				return err
 			}
 			sent += int64(n)
+			if s.OnBytes != nil {
+				s.OnBytes(rel, int64(n))
+			}
 		}
 		if rerr == io.EOF {
 			break
@@ -183,17 +228,105 @@ func (s *Server) get(w io.Writer, id, rel string, offset int64) error {
 	return wire.WriteJSON(w, wire.Msg{Type: wire.MsgDone, Hash: "blake3:" + hex.EncodeToString(h.Sum(nil))})
 }
 
+var chunkPool = sync.Pool{New: func() any { b := make([]byte, wire.ChunkSize); return &b }}
+
 // Client est la vue « source » d'un agent distant, pour le moteur.
+//
+// Les demandes de fichiers peuvent être envoyées d'avance (Prefetch) : l'agent
+// y répond dans l'ordre, sans attendre un aller-retour réseau par fichier.
+// Get consomme les réponses dans le même ordre.
 type Client struct {
 	RW io.ReadWriteCloser
+
+	once    sync.Once
+	br      *bufio.Reader
+	bw      *bufio.Writer
+	pending []getReq // demandes envoyées d'avance, réponses non lues
+	cur     *stream  // fichier en cours de lecture
+}
+
+type getReq struct {
+	dataset, rel string
+	offset       int64
+}
+
+func (c *Client) init() {
+	c.once.Do(func() {
+		c.br = bufio.NewReaderSize(c.RW, 256<<10)
+		c.bw = bufio.NewWriterSize(c.RW, 16<<10)
+	})
+}
+
+func (c *Client) send(m wire.Msg) error {
+	c.init()
+	return wire.WriteJSON(c.bw, m)
+}
+
+// recv envoie les demandes en attente puis lit un message de contrôle.
+func (c *Client) recv(m *wire.Msg) error {
+	if err := c.bw.Flush(); err != nil {
+		return err
+	}
+	return wire.ReadJSON(c.br, m)
+}
+
+// settle lit jusqu'au bout le fichier en cours et les réponses envoyées
+// d'avance qui n'ont pas été consommées, pour que le protocole reste aligné.
+func (c *Client) settle(keep int) error {
+	c.init()
+	if c.cur != nil {
+		if _, err := c.cur.Finish(); err != nil && !isFileErr(err) {
+			return err
+		}
+		c.cur = nil
+	}
+	for len(c.pending) > keep {
+		c.pending = c.pending[1:]
+		if err := c.skipResponse(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// skipResponse lit et jette la réponse à une demande de fichier.
+func (c *Client) skipResponse() error {
+	var m wire.Msg
+	if err := c.recv(&m); err != nil {
+		return err
+	}
+	switch m.Type {
+	case wire.MsgError:
+		return nil
+	case wire.MsgFile:
+		st := &stream{r: c.br}
+		if _, err := st.Finish(); err != nil && !isFileErr(err) {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("protocole : message inattendu %q", m.Type)
+}
+
+func isFileErr(err error) bool {
+	_, ok := err.(*source.FileError)
+	return ok
+}
+
+// call envoie une demande simple et lit sa réponse.
+func (c *Client) call(req wire.Msg, m *wire.Msg) error {
+	if err := c.settle(0); err != nil {
+		return err
+	}
+	if err := c.send(req); err != nil {
+		return err
+	}
+	return c.recv(m)
 }
 
 func (c *Client) Inventory(ctx context.Context) (*inventory.Inventory, error) {
-	if err := wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgInventory}); err != nil {
-		return nil, err
-	}
 	var m wire.Msg
-	if err := wire.ReadJSON(c.RW, &m); err != nil {
+	if err := c.call(wire.Msg{Type: wire.MsgInventory}, &m); err != nil {
 		return nil, err
 	}
 	if m.Type != wire.MsgInventory {
@@ -209,13 +342,16 @@ func (c *Client) Inventory(ctx context.Context) (*inventory.Inventory, error) {
 // List transmet chaque élément à fn. Un élément illisible côté source arrive
 // avec Kind = KindUnreadable et le message d'erreur dans Link.
 func (c *Client) List(ctx context.Context, dataset string, fn func(source.Entry) error) error {
-	if err := wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgList, Dataset: dataset}); err != nil {
+	if err := c.settle(0); err != nil {
+		return err
+	}
+	if err := c.send(wire.Msg{Type: wire.MsgList, Dataset: dataset}); err != nil {
 		return err
 	}
 	var fnErr error
 	for {
 		var m wire.Msg
-		if err := wire.ReadJSON(c.RW, &m); err != nil {
+		if err := c.recv(&m); err != nil {
 			return err
 		}
 		switch m.Type {
@@ -245,11 +381,8 @@ func (c *Client) List(ctx context.Context, dataset string, fn func(source.Entry)
 // Secrets demande les hachages des mots de passe. Une erreur signifie
 // simplement qu'il faudra saisir de nouveaux mots de passe.
 func (c *Client) Secrets(ctx context.Context) (map[string]string, error) {
-	if err := wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgSecrets}); err != nil {
-		return nil, err
-	}
 	var m wire.Msg
-	if err := wire.ReadJSON(c.RW, &m); err != nil {
+	if err := c.call(wire.Msg{Type: wire.MsgSecrets}, &m); err != nil {
 		return nil, err
 	}
 	if m.Type != wire.MsgSecrets {
@@ -261,11 +394,8 @@ func (c *Client) Secrets(ctx context.Context) (map[string]string, error) {
 
 // Extras demande les réglages lus en administrateur ; out reçoit le JSON.
 func (c *Client) Extras(ctx context.Context, out any) error {
-	if err := wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgExtras}); err != nil {
-		return err
-	}
 	var m wire.Msg
-	if err := wire.ReadJSON(c.RW, &m); err != nil {
+	if err := c.call(wire.Msg{Type: wire.MsgExtras}, &m); err != nil {
 		return err
 	}
 	if m.Type != wire.MsgExtras {
@@ -274,12 +404,54 @@ func (c *Client) Extras(ctx context.Context, out any) error {
 	return json.Unmarshal(m.Body, out)
 }
 
+// SendStatus annonce l'étape en cours à l'agent, qui l'affiche. Un agent
+// plus ancien ne connaît pas ce message : son refus est ignoré.
+func (c *Client) SendStatus(ctx context.Context, st Status) error {
+	b, _ := json.Marshal(st)
+	var m wire.Msg
+	return c.call(wire.Msg{Type: wire.MsgStatus, Body: b}, &m)
+}
+
+// Prefetch demande un fichier d'avance ; Get le lira plus tard.
+func (c *Client) Prefetch(dataset, rel string, offset int64) error {
+	if err := c.send(wire.Msg{Type: wire.MsgGet, Dataset: dataset, Rel: rel, Offset: offset}); err != nil {
+		return err
+	}
+	c.pending = append(c.pending, getReq{dataset, rel, offset})
+	return nil
+}
+
+// Flush envoie les demandes faites d'avance.
+func (c *Client) Flush() error {
+	c.init()
+	return c.bw.Flush()
+}
+
 func (c *Client) Get(ctx context.Context, dataset, rel string, offset int64) (source.FileStream, error) {
-	if err := wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgGet, Dataset: dataset, Rel: rel, Offset: offset}); err != nil {
+	want := getReq{dataset, rel, offset}
+	// Réponses demandées d'avance mais plus utiles (fichier sauté) : lues et
+	// jetées jusqu'à celle-ci. Si elle n'a pas été demandée, tout est vidé.
+	idx := -1
+	for i, p := range c.pending {
+		if p == want {
+			idx = i
+			break
+		}
+	}
+	keep := 0
+	if idx >= 0 {
+		keep = len(c.pending) - idx
+	}
+	if err := c.settle(keep); err != nil {
+		return nil, err
+	}
+	if idx >= 0 {
+		c.pending = c.pending[1:]
+	} else if err := c.send(wire.Msg{Type: wire.MsgGet, Dataset: dataset, Rel: rel, Offset: offset}); err != nil {
 		return nil, err
 	}
 	var m wire.Msg
-	if err := wire.ReadJSON(c.RW, &m); err != nil {
+	if err := c.recv(&m); err != nil {
 		return nil, err
 	}
 	if m.Type == wire.MsgError {
@@ -295,11 +467,15 @@ func (c *Client) Get(ctx context.Context, dataset, rel string, offset int64) (so
 	if m.Offset != offset {
 		return nil, fmt.Errorf("protocole : reprise à %d demandée, %d accordée", offset, m.Offset)
 	}
-	return &stream{r: c.RW, info: e}, nil
+	c.cur = &stream{r: c.br, info: e}
+	return c.cur, nil
 }
 
 func (c *Client) Close() error {
-	wire.WriteJSON(c.RW, wire.Msg{Type: wire.MsgBye})
+	if c.settle(0) == nil {
+		c.send(wire.Msg{Type: wire.MsgBye})
+		c.bw.Flush()
+	}
 	return c.RW.Close()
 }
 
@@ -346,6 +522,9 @@ func (s *stream) Finish() (string, error) {
 	}
 	if s.err != nil {
 		return "", s.err
+	}
+	if s.end == nil {
+		return "", io.ErrUnexpectedEOF
 	}
 	if s.end.Type == wire.MsgError {
 		return "", &source.FileError{Rel: s.info.Rel, Msg: s.end.Error}

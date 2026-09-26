@@ -75,3 +75,48 @@ func TestWaitStopsOnCancel(t *testing.T) {
 		t.Fatal("Wait n'a pas réagi à l'annulation")
 	}
 }
+
+func TestTrackerBetterRoute(t *testing.T) {
+	tr := &Tracker{names: map[string]string{"x": "nouveau"}, seen: map[string]map[string]seenRoute{"x": {
+		"192.168.1.20:51516": {Route{Addr: "192.168.1.20:51516", Link: LinkWifi}, time.Now()},
+	}}}
+	if _, ok := tr.BetterRoute("x", "192.168.1.20:51516"); ok {
+		t.Fatal("aucune meilleure liaison tant que seul le Wi-Fi existe")
+	}
+	tr.seen["x"]["192.168.1.21:51516"] = seenRoute{Route{Addr: "192.168.1.21:51516", Link: LinkEthernet, Speed: 1000}, time.Now()}
+	r, ok := tr.BetterRoute("x", "192.168.1.20:51516")
+	if !ok || r.Addr != "192.168.1.21:51516" {
+		t.Fatalf("le câble aurait dû être proposé : %+v %v", r, ok)
+	}
+	if _, ok := tr.BetterRoute("x", "192.168.1.21:51516"); ok {
+		t.Fatal("déjà sur le câble : rien à proposer")
+	}
+	if _, ok := tr.BetterRoute("x", "10.0.0.5:51516"); ok {
+		t.Fatal("adresse saisie à la main : pas de bascule")
+	}
+	// Liaison plus vue depuis longtemps : oubliée.
+	tr.seen["x"]["192.168.1.21:51516"] = seenRoute{Route{Addr: "192.168.1.21:51516", Link: LinkEthernet}, time.Now().Add(-time.Minute)}
+	if _, ok := tr.BetterRoute("x", "192.168.1.20:51516"); ok {
+		t.Fatal("câble débranché : ne plus le proposer")
+	}
+}
+
+func TestTrackerWaitsForLateTarget(t *testing.T) {
+	probe, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	probe.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	tr, err := Track(ctx, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(2 * time.Second)
+		Announce(ctx, Beacon{ID: "late", Name: "tardif", Port: 40002}, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+	}()
+	got, err := tr.Wait(ctx, nil)
+	if err != nil || len(got) != 1 || got[0].Name != "tardif" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

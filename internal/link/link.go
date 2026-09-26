@@ -51,25 +51,88 @@ type Routes func(ctx context.Context) []string
 // ServeWithReconnect sert le moteur et, en cas de coupure, rétablit la
 // session par une autre liaison. Elle se termine quand le moteur dit au revoir.
 func ServeWithReconnect(ctx context.Context, conn *session.Conn, srv *remote.Server, routes Routes, name string, log func(string)) error {
+	return Serve(ctx, conn, srv, Options{Routes: routes, Name: name, Log: log})
+}
+
+// Options règle Serve.
+type Options struct {
+	Routes Routes
+	Name   string
+	Log    func(string)
+	// Better, s'il est fourni, propose une liaison nettement plus rapide que
+	// celle en cours (adresse hôte:port), par exemple un câble réseau
+	// branché pendant un transfert en Wi-Fi.
+	Better func(current string) (addr, label string, ok bool)
+	// CheckEvery est l'intervalle entre deux recherches d'une meilleure
+	// liaison (5 s par défaut).
+	CheckEvery time.Duration
+	// OnConnect est appelé à chaque liaison établie (adresse de la cible).
+	OnConnect func(addr string)
+}
+
+// Serve sert le moteur, rétablit la session après une coupure et bascule
+// d'elle-même sur une liaison plus rapide quand il en apparaît une : la
+// session en cours est fermée proprement, puis reprise sur la nouvelle
+// liaison (sans nouveau code). Rien de ce qui est vérifié n'est renvoyé.
+func Serve(ctx context.Context, conn *session.Conn, srv *remote.Server, o Options) error {
 	key := conn.ResumeKey
+	if o.Log == nil {
+		o.Log = func(string) {}
+	}
+	if o.CheckEvery <= 0 {
+		o.CheckEvery = 5 * time.Second
+	}
+	var prefer string // liaison à essayer d'abord après une bascule
+	if o.OnConnect != nil {
+		o.OnConnect(conn.RemoteAddr().String())
+	}
 	for {
+		stop := make(chan struct{})
+		switched := make(chan string, 1)
+		if o.Better != nil {
+			go watchBetter(conn, o, stop, switched)
+		}
+		// Un arrêt demandé coupe tout de suite, même au milieu d'un gros fichier.
+		go func(c *session.Conn) {
+			select {
+			case <-ctx.Done():
+				c.Close()
+			case <-stop:
+			}
+		}(conn)
 		err := srv.Serve(ctx, conn)
+		close(stop)
 		conn.Close()
-		if err == nil || ctx.Err() != nil || !IsLinkError(err) {
+		prefer = ""
+		select {
+		case addr := <-switched:
+			prefer = addr
+		default:
+		}
+		if err == nil || ctx.Err() != nil || (!IsLinkError(err) && prefer == "") {
 			return err
 		}
-		log("Liaison perdue. Recherche d'une autre liaison (câble, Wi-Fi)…")
+		if prefer == "" {
+			o.Log("Liaison perdue. Recherche d'une autre liaison (câble, Wi-Fi)…")
+		}
 		deadline := time.Now().Add(GiveUp)
 		conn = nil
 		for conn == nil {
 			if time.Now().After(deadline) {
 				return errors.New("liaison non rétablie : relancez la commande pour reprendre")
 			}
-			for _, addr := range routes(ctx) {
-				c, rerr := session.Resume(ctx, addr, key, name)
+			addrs := o.Routes(ctx)
+			if prefer != "" {
+				addrs = append([]string{prefer}, addrs...)
+			}
+			for _, addr := range addrs {
+				c, rerr := session.Resume(ctx, addr, key, o.Name)
 				if rerr == nil {
 					conn = c
-					log("Reconnecté via " + addr + ". Le transfert reprend.")
+					o.Log("Reconnecté via " + addr + ". Le transfert reprend.")
+					if o.OnConnect != nil {
+						o.OnConnect(addr)
+					}
 					break
 				}
 				if errors.Is(rerr, session.ErrNoSession) {
@@ -83,6 +146,39 @@ func ServeWithReconnect(ctx context.Context, conn *session.Conn, srv *remote.Ser
 				case <-time.After(2 * time.Second):
 				}
 			}
+		}
+	}
+}
+
+// watchBetter ferme la session quand une liaison nettement plus rapide est
+// vue deux fois de suite (un câble à peine branché met quelques secondes à
+// obtenir son adresse).
+func watchBetter(conn *session.Conn, o Options, stop <-chan struct{}, switched chan<- string) {
+	tick := time.NewTicker(o.CheckEvery)
+	defer tick.Stop()
+	current := conn.RemoteAddr().String()
+	streak, last := 0, ""
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+		}
+		addr, label, ok := o.Better(current)
+		if !ok {
+			streak, last = 0, ""
+			continue
+		}
+		if addr == last {
+			streak++
+		} else {
+			streak, last = 1, addr
+		}
+		if streak >= 2 {
+			o.Log("Liaison plus rapide détectée (" + label + ") : bascule en cours…")
+			switched <- addr
+			conn.Close()
+			return
 		}
 	}
 }

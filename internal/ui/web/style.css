@@ -23,6 +23,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   font-family: var(--font); font-size: 16px; line-height: 1.5;
@@ -81,6 +82,9 @@ p { max-width: 70ch; }
   font: 700 3rem/1 var(--mono); font-variant-numeric: tabular-nums;
 }
 .code .gap { width: 14px; }
+.code.small b { width: 40px; height: 52px; font-size: 1.9rem; }
+.banner p { margin: 0 0 8px; }
+.banner p:last-child { margin-bottom: 0; }
 .howto { counter-reset: h; list-style: none; padding: 0; margin: 0 0 24px; display: grid; gap: 10px; max-width: 62ch; }
 .howto li { counter-increment: h; display: grid; grid-template-columns: 28px 1fr; gap: 8px; }
 .howto li::before { content: counter(h) "."; font-weight: 700; color: var(--tide); }
@@ -91,6 +95,32 @@ code, .cmd { font-family: var(--mono); font-size: .95em; }
 @keyframes pulse { 50% { opacity: .25; transform: scale(.8); } }
 .addresses { font-size: .9rem; color: var(--deep-2); }
 .links-hint { font-size: .95rem; color: var(--deep-2); border-left: 3px solid var(--line); padding-left: 12px; }
+
+/* Saisie du code (ancien ordinateur) */
+.code-entry { display: flex; gap: 10px; margin: 8px 0 20px; }
+.code-entry input {
+  width: 64px; height: 84px; text-align: center; border-radius: 10px;
+  border: 2px solid var(--shell); background: var(--paper); color: var(--deep);
+  font: 700 3rem/1 var(--mono); caret-color: var(--tide);
+}
+.code-entry input:focus { background: color-mix(in srgb, var(--shell) 25%, var(--paper)); outline: none; }
+.code-entry input:disabled { opacity: .6; }
+.code-entry .gap { width: 14px; }
+.found { display: flex; align-items: center; gap: 14px; margin: 4px 0 20px; }
+.found svg { width: 48px; height: 48px; stroke: var(--tide); fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.found strong { font-size: 1.2rem; }
+label.choice.disk { grid-template-columns: 24px 1fr; align-items: center; }
+label.choice.disk input { width: 18px; height: 18px; accent-color: var(--tide); }
+.choices.targets { margin-bottom: 20px; }
+
+/* Attente : deux ordinateurs qui se cherchent */
+.radar { display: flex; align-items: center; gap: 18px; margin: 12px 0 24px; }
+.radar svg { width: 72px; height: 72px; stroke: var(--tide); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.radar .dots { display: flex; gap: 10px; }
+.radar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--tide); opacity: .25; animation: hop 1.8s ease-in-out infinite; }
+.radar .dots i:nth-child(2) { animation-delay: .3s; }
+.radar .dots i:nth-child(3) { animation-delay: .6s; }
+@keyframes hop { 30% { opacity: 1; transform: translateY(-4px); } 60% { opacity: .25; transform: none; } }
 
 /* Formulaires et listes */
 label.field { display: grid; gap: 6px; margin: 0 0 16px; max-width: 420px; font-weight: 600; }
@@ -143,7 +173,7 @@ button:disabled { opacity: .5; cursor: default; }
 /* Progression : la ligne de marée */
 .tide { height: 18px; border-radius: 9px; background: var(--paper); border: 1px solid var(--line); overflow: hidden; margin: 18px 0 10px; }
 .tide i { display: block; height: 100%; width: 0; background: var(--tide); transition: width .6s ease; }
-.figures { display: flex; flex-wrap: wrap; gap: 8px 32px; font-variant-numeric: tabular-nums; }
+.figures { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 8px 40px; font-variant-numeric: tabular-nums; }
 .figures div span { display: block; font-size: .85rem; color: var(--deep-2); }
 .figures div b { font-size: 1.25rem; }
 .current-file { font-family: var(--mono); font-size: .9rem; color: var(--deep-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 14px; }
@@ -172,9 +202,10 @@ dialog h2 { margin-top: 0; }
   .steps, .rail-note { display: none; }
   main { padding: 24px 20px 140px; }
   .bar { left: 0; padding: 12px 20px; flex-wrap: wrap; }
-  .code b { width: 44px; height: 60px; font-size: 2rem; }
+  .code b, .code-entry input { width: 44px; height: 60px; font-size: 2rem; }
+  .figures { grid-template-columns: repeat(2, auto); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pulse { animation: none; }
+  .pulse, .radar .dots i { animation: none; }
   .tide i { transition: none; }
 }

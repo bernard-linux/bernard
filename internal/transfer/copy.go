@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeebo/blake3"
@@ -56,6 +57,9 @@ const (
 	maxConflicts = 1000
 )
 
+// bufPool évite d'allouer 1 Mo par fichier (des milliers de petits fichiers).
+var bufPool = sync.Pool{New: func() any { b := make([]byte, bufSize); return &b }}
+
 // HashFile calcule l'empreinte BLAKE3 d'un fichier.
 func HashFile(path string) (string, int64, error) {
 	f, err := os.Open(path)
@@ -64,7 +68,9 @@ func HashFile(path string) (string, int64, error) {
 	}
 	defer f.Close()
 	h := blake3.New()
-	n, err := io.CopyBuffer(h, f, make([]byte, bufSize))
+	buf := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf)
+	n, err := io.CopyBuffer(h, onlyReader{f}, *buf)
 	if err != nil {
 		return "", n, err
 	}
@@ -234,3 +240,8 @@ func syncDir(dir string) error {
 	}
 	return nil
 }
+
+// onlyReader empêche io.CopyBuffer de contourner le tampon fourni.
+type onlyReader struct{ r io.Reader }
+
+func (o onlyReader) Read(p []byte) (int, error) { return o.r.Read(p) }

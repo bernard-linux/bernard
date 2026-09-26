@@ -1,10 +1,16 @@
 // Package engine exécute, sur la cible, la copie des jeux de données depuis
 // une source (agent réseau ou paquet sur disque externe).
 //
-// Chaque étape est journalisée et synchronisée avant la suivante. Après une
-// coupure, relancer CopyDataSet avec le même journal reprend exactement où
-// l'on s'était arrêté : fichiers terminés sautés, fichier en cours repris au
-// dernier point synchronisé.
+// Chaque étape est journalisée. Après une coupure, relancer CopyDataSet avec
+// le même journal reprend exactement où l'on s'était arrêté : fichiers
+// terminés sautés, gros fichier en cours repris au dernier point synchronisé.
+//
+// Petits fichiers (moins de 1 Mo) : ils sont demandés d'avance à l'agent,
+// écrits sans attendre le disque, puis validés par lots — un seul passage
+// sur le disque (syncfs) avant de les ranger, un autre après, puis le
+// journal. Aucun fichier n'est rangé sous son nom final avant d'être sur le
+// disque et vérifié ; une coupure fait seulement recevoir à nouveau le lot en
+// cours.
 package engine
 
 import (
@@ -25,6 +31,23 @@ import (
 
 // DefaultSyncEvery est l'intervalle entre deux points de reprise.
 const DefaultSyncEvery = 8 << 20
+
+// Réglages des lots de petits fichiers et des demandes d'avance.
+const (
+	SmallFile     = 1 << 20         // taille sous laquelle un fichier va dans un lot
+	batchFiles    = 256             // fichiers par lot au plus
+	batchBytes    = 32 << 20        // octets par lot au plus
+	batchAge      = 2 * time.Second // âge maximal d'un lot
+	aheadFiles    = 64              // demandes d'avance au plus
+	aheadBytes    = 16 << 20        // octets demandés d'avance au plus
+	aheadReqBytes = 32 << 10        // taille cumulée des demandes (voir prefetch)
+)
+
+// Prefetcher est une source qui accepte des demandes d'avance (agent réseau).
+type Prefetcher interface {
+	Prefetch(dataset, rel string, offset int64) error
+	Flush() error
+}
 
 // Progress est transmis après chaque élément traité.
 type Progress struct {
@@ -47,6 +70,24 @@ type Receiver struct {
 	curIndex int
 	curTotal int
 	lastTick time.Time
+
+	// Lot de petits fichiers reçus, pas encore rangés.
+	batch      []pending
+	batchSize  int64
+	batchSince time.Time
+
+	// Demandes d'avance : prochain élément à examiner, et éléments demandés
+	// dont la réponse n'est pas encore lue.
+	aheadNext  int
+	ahead      map[int]int64 // index → octets
+	aheadBytes int64
+	aheadReq   int
+}
+
+// pending est un petit fichier reçu, en attente de validation par lot.
+type pending struct {
+	key, part, dst, hash string
+	e                    source.Entry
 }
 
 // fatal indique une erreur qui doit interrompre la session (reprise plus
@@ -110,49 +151,129 @@ func (r *Receiver) CopyDataSetAs(ctx context.Context, ds inventory.DataSet, dstR
 			return err
 		}
 		rep.Errors = append(rep.Errors, transfer.FileError{Path: rel, Err: err.Error()})
-		r.Journal.Append(journal.Record{T: journal.RecError, Key: ds.ID + "/" + rel, Error: err.Error()})
+		r.Journal.Write(journal.Record{T: journal.RecError, Key: ds.ID + "/" + rel, Error: err.Error()})
 		return nil
 	}
+	r.batch, r.batchSize = nil, 0
+	r.aheadNext, r.ahead, r.aheadBytes, r.aheadReq = 0, map[int]int64{}, 0, 0
+	pf, _ := r.Src.(Prefetcher)
 
 	for i, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return rep, err
 		}
+		if pf != nil {
+			if err := r.prefetch(pf, ds, entries, i, dstRoot); err != nil {
+				return rep, err
+			}
+		}
 		r.curIndex, r.curTotal = i, len(entries)
 		key := ds.ID + "/" + e.Rel
 		dst := filepath.Join(dstRoot, filepath.FromSlash(e.Rel))
-		if owner != nil {
-			if err := transfer.SafeParents(dstRoot, dst); err != nil {
-				if err := fail(e.Rel, err); err != nil {
-					return rep, err
-				}
-				continue
+		err := r.handle(ctx, ds, e, i, len(entries), key, dst, dstRoot, owner, rep, fail)
+		if n, ok := r.ahead[i]; ok { // réponse lue ou à jeter : plus en attente
+			delete(r.ahead, i)
+			r.aheadBytes -= n
+			r.aheadReq -= len(e.Rel) + 100
+		}
+		if err != nil {
+			return rep, err
+		}
+		if len(r.batch) > 0 && (len(r.batch) >= batchFiles || r.batchSize >= batchBytes || time.Since(r.batchSince) > batchAge) {
+			if err := r.flush(ctx, ds.ID, dstRoot, owner, rep, fail, len(entries)); err != nil {
+				return rep, err
 			}
 		}
+	}
+	if err := r.flush(ctx, ds.ID, dstRoot, owner, rep, fail, len(entries)); err != nil {
+		return rep, err
+	}
+	return rep, r.Journal.Sync()
+}
 
-		if done, ok := r.State.Done[key]; ok && sameSource(done, e) {
-			if _, err := os.Lstat(done.Dst); err == nil {
-				rep.AlreadyPresent++
-				r.progress(ds.ID, e.Rel, i, len(entries))
-				continue
+// isDone indique qu'un élément a déjà été copié lors d'une session
+// précédente (reprise), et n'a pas changé depuis.
+func (r *Receiver) isDone(key string, e source.Entry) bool {
+	if done, ok := r.State.Done[key]; ok && sameSource(done, e) {
+		if _, err := os.Lstat(done.Dst); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// small indique qu'un fichier passe par les lots : petit, et pas de reprise
+// en cours à un décalage (sinon, chemin classique).
+func (r *Receiver) small(key string, e source.Entry) bool {
+	if e.Kind != source.KindFile || e.Size >= SmallFile {
+		return false
+	}
+	p, ok := r.State.Progress[key]
+	return !ok || p.Offset == 0
+}
+
+// prefetch demande d'avance les petits fichiers qui suivent i, dans la
+// limite de la fenêtre. Il ne dépasse jamais un gros fichier : les réponses
+// arrivent ainsi dans l'ordre où le moteur les lit. La taille cumulée des
+// demandes reste petite pour ne jamais remplir le tampon réseau de l'agent
+// (qui pourrait sinon bloquer les deux côtés).
+func (r *Receiver) prefetch(pf Prefetcher, ds inventory.DataSet, entries []source.Entry, i int, dstRoot string) error {
+	if r.aheadNext < i {
+		r.aheadNext = i
+	}
+	sent := false
+	for r.aheadNext < len(entries) && len(r.ahead) < aheadFiles && r.aheadBytes < aheadBytes && r.aheadReq < aheadReqBytes {
+		e := entries[r.aheadNext]
+		key := ds.ID + "/" + e.Rel
+		if e.Kind == source.KindFile && !r.small(key, e) && !r.isDone(key, e) {
+			break // gros fichier : pas de demande au-delà
+		}
+		if e.Kind == source.KindFile && !r.isDone(key, e) {
+			if err := pf.Prefetch(ds.ID, e.Rel, 0); err != nil {
+				return err
 			}
+			r.ahead[r.aheadNext] = e.Size
+			r.aheadBytes += e.Size
+			r.aheadReq += len(e.Rel) + 100
+			sent = true
+		}
+		r.aheadNext++
+	}
+	if sent {
+		return pf.Flush()
+	}
+	return nil
+}
+
+// handle traite un élément de la liste.
+func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.Entry, i, total int, key, dst, dstRoot string, owner *transfer.Owner, rep *transfer.TreeReport, fail func(string, error) error) error {
+	{
+		if owner != nil {
+			if err := transfer.SafeParents(dstRoot, dst); err != nil {
+				return fail(e.Rel, err)
+			}
+		}
+		if r.isDone(key, e) {
+			rep.AlreadyPresent++
+			r.progress(ds.ID, e.Rel, i, total)
+			return nil
 		}
 
 		switch e.Kind {
 		case source.KindDir:
+			// Journal écrit sans attendre : il devient durable au prochain lot.
+			// Perdu dans une coupure, le dossier serait seulement conservé
+			// lors d'une annulation.
 			created, err := transfer.EnsureDir(dst, e.Mode.Perm())
 			if err == nil && created {
 				err = owner.Apply(dst)
 			}
 			if err != nil {
-				if err := fail(e.Rel, err); err != nil {
-					return rep, err
-				}
-				continue
+				return fail(e.Rel, err)
 			}
 			if created {
-				if err := r.Journal.Append(journal.Record{T: journal.RecDir, Dst: dst}); err != nil {
-					return rep, err
+				if err := r.Journal.Write(journal.Record{T: journal.RecDir, Dst: dst}); err != nil {
+					return err
 				}
 			}
 		case source.KindSymlink:
@@ -161,30 +282,148 @@ func (r *Receiver) CopyDataSetAs(ctx context.Context, ds inventory.DataSet, dstR
 				err = owner.Apply(res.Dst)
 			}
 			if err != nil {
-				if err := fail(e.Rel, err); err != nil {
-					return rep, err
-				}
-				continue
+				return fail(e.Rel, err)
 			}
-			if err := r.done(key, res, e); err != nil {
-				return rep, err
+			if err := r.doneLater(key, res, e); err != nil {
+				return err
 			}
 			tally(rep, res)
 		case source.KindFile:
+			if r.small(key, e) {
+				if err := r.receiveSmall(ctx, ds.ID, e, dst, key); err != nil {
+					return fail(e.Rel, err)
+				}
+				return nil // compté et signalé au rangement du lot
+			}
+			// Gros fichier : le lot en cours est d'abord rangé.
+			if err := r.flush(ctx, ds.ID, dstRoot, owner, rep, fail, total); err != nil {
+				return err
+			}
 			res, err := r.receiveFile(ctx, ds.ID, e, dst, key, owner)
 			if err != nil {
-				if err := fail(e.Rel, err); err != nil {
-					return rep, err
-				}
-				continue
+				return fail(e.Rel, err)
 			}
 			tally(rep, res)
 		default:
 			rep.Skipped = append(rep.Skipped, e.Rel)
 		}
-		r.progress(ds.ID, e.Rel, i, len(entries))
+		r.progress(ds.ID, e.Rel, i, total)
 	}
-	return rep, nil
+	return nil
+}
+
+// receiveSmall reçoit un petit fichier dans son fichier temporaire, sans
+// attendre le disque ; il sera vérifié et rangé avec son lot.
+func (r *Receiver) receiveSmall(ctx context.Context, ds string, e source.Entry, dst, key string) error {
+	part := transfer.PartPath(filepath.Dir(dst), key)
+	f, _, err := transfer.OpenPart(part, 0)
+	if err != nil {
+		return err
+	}
+	// Le fichier temporaire est consigné pour l'annulation ; le journal est
+	// synchronisé avant les données du lot. Si une coupure survient avant,
+	// la reprise réutilise ce même fichier temporaire (nom stable).
+	if err := r.Journal.Write(journal.Record{T: journal.RecProgress, Key: key, Part: part}); err != nil {
+		f.Close()
+		return err
+	}
+	st, err := r.Src.Get(ctx, ds, e.Rel, 0)
+	if err != nil {
+		f.Close()
+		os.Remove(part)
+		return err
+	}
+	n, err := io.Copy(f, st)
+	if err != nil {
+		f.Close()
+		os.Remove(part)
+		return err
+	}
+	r.bytes += n
+	hash, err := st.Finish()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(part)
+		return err
+	}
+	info := st.Info()
+	info.Rel = e.Rel
+	if len(r.batch) == 0 {
+		r.batchSince = time.Now()
+	}
+	r.batch = append(r.batch, pending{key: key, part: part, dst: dst, hash: hash, e: info})
+	r.batchSize += n
+	return nil
+}
+
+// flush range le lot : données sur le disque, vérification, nom final,
+// puis journal.
+func (r *Receiver) flush(ctx context.Context, dsID, dstRoot string, owner *transfer.Owner, rep *transfer.TreeReport, fail func(string, error) error, total int) error {
+	if len(r.batch) == 0 {
+		return nil
+	}
+	batch := r.batch
+	r.batch, r.batchSize = nil, 0
+	if err := r.Journal.Sync(); err != nil {
+		return err
+	}
+	parts := make([]string, len(batch))
+	for i, p := range batch {
+		parts[i] = p.part
+	}
+	if err := transfer.SyncFS(dstRoot, parts); err != nil {
+		return err
+	}
+	var placed []transfer.FileResult
+	var ok []pending
+	for _, p := range batch {
+		res, err := transfer.CommitPartNoSync(p.part, p.dst, p.hash, p.e.Size, p.e.Mode, p.e.MTime)
+		if err == nil && res.Status != transfer.StatusAlreadyPresent {
+			err = owner.Apply(res.Dst)
+		}
+		if errors.Is(err, transfer.ErrVerifyFailed) {
+			// Contenu écrit différent de la source : fichier redemandé une
+			// fois, par le chemin classique (synchronisé, vérifié).
+			os.Remove(p.part)
+			res, err = r.receiveFile(ctx, dsID, p.e, p.dst, p.key, owner)
+			if err == nil {
+				tally(rep, res)
+				continue
+			}
+		}
+		if err != nil {
+			os.Remove(p.part)
+			if ferr := fail(p.e.Rel, err); ferr != nil {
+				return ferr
+			}
+			continue
+		}
+		res.Src = p.e.Rel
+		placed = append(placed, res)
+		ok = append(ok, p)
+	}
+	var files []string
+	for _, res := range placed {
+		files = append(files, res.Dst)
+	}
+	if err := transfer.SyncFS(dstRoot, files); err != nil {
+		return err
+	}
+	for i, res := range placed {
+		if err := r.doneLater(ok[i].key, res, ok[i].e); err != nil {
+			return err
+		}
+		tally(rep, res)
+	}
+	if err := r.Journal.Sync(); err != nil {
+		return err
+	}
+	if len(ok) > 0 {
+		r.progress(dsID, ok[len(ok)-1].e.Rel, r.curIndex, total)
+	}
+	return nil
 }
 
 func (r *Receiver) progress(ds, rel string, i, total int) {
@@ -206,11 +445,21 @@ func tally(rep *transfer.TreeReport, res transfer.FileResult) {
 	}
 }
 
-func (r *Receiver) done(key string, res transfer.FileResult, e source.Entry) error {
-	return r.Journal.Append(journal.Record{
+func doneRecord(key string, res transfer.FileResult, e source.Entry) journal.Record {
+	return journal.Record{
 		T: journal.RecDone, Key: key, Dst: res.Dst, Hash: res.Hash, Status: string(res.Status),
 		Size: res.Bytes, SrcMTime: e.MTime,
-	})
+	}
+}
+
+// done consigne un élément terminé et attend le disque.
+func (r *Receiver) done(key string, res transfer.FileResult, e source.Entry) error {
+	return r.Journal.Append(doneRecord(key, res, e))
+}
+
+// doneLater consigne un élément terminé ; durable au prochain Sync.
+func (r *Receiver) doneLater(key string, res transfer.FileResult, e source.Entry) error {
+	return r.Journal.Write(doneRecord(key, res, e))
 }
 
 // sameSource indique que l'élément source n'a pas changé depuis sa copie.

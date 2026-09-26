@@ -209,3 +209,28 @@ func TestRealFlatpak(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetriesWhenAccountFilesLocked(t *testing.T) {
+	old := LockDelay
+	LockDelay = 0
+	defer func() { LockDelay = old }()
+	calls := 0
+	s := &System{Exec: func(_ context.Context, c sysexec.Cmd) (string, error) {
+		switch c.Name {
+		case "useradd":
+			calls++
+			if calls < 3 {
+				return "", errors.New("useradd: cannot lock /etc/passwd; try again later.")
+			}
+		case "getent":
+			return "", errors.New("absent")
+		}
+		return "", nil
+	}}
+	if _, err := s.CreateUser(context.Background(), UserSpec{Login: "alice", Password: "x"}); err != nil {
+		t.Fatalf("aurait dû réussir au troisième essai : %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("essais : %d, attendu 3", calls)
+	}
+}

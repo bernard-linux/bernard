@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
@@ -48,7 +49,36 @@ type System struct {
 func New() *System { return &System{Exec: sysexec.Run} }
 
 func (s *System) run(ctx context.Context, name string, args ...string) (string, error) {
-	return s.Exec(ctx, sysexec.Cmd{Name: name, Args: args})
+	return s.exec(ctx, sysexec.Cmd{Name: name, Args: args})
+}
+
+// LockRetries et LockDelay règlent l'attente quand le fichier des comptes
+// est verrouillé par un autre programme (mise à jour automatique en arrière-
+// plan, par exemple) : on réessaie au lieu d'échouer.
+var (
+	LockRetries = 10
+	LockDelay   = 3 * time.Second
+)
+
+// exec exécute une commande en réessayant si /etc/passwd, /etc/shadow ou
+// /etc/group sont momentanément verrouillés.
+func (s *System) exec(ctx context.Context, c sysexec.Cmd) (string, error) {
+	for attempt := 0; ; attempt++ {
+		out, err := s.Exec(ctx, c)
+		if err == nil || attempt >= LockRetries || !lockBusy(err) {
+			return out, err
+		}
+		select {
+		case <-ctx.Done():
+			return out, ctx.Err()
+		case <-time.After(LockDelay):
+		}
+	}
+}
+
+func lockBusy(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "cannot lock") || strings.Contains(msg, "try again later")
 }
 
 // UserSpec décrit un compte à créer.
@@ -132,7 +162,7 @@ func (s *System) CreateUser(ctx context.Context, u UserSpec) ([]string, error) {
 	} else {
 		c.Stdin = u.Login + ":" + u.Password + "\n"
 	}
-	if _, err := s.Exec(ctx, c); err != nil {
+	if _, err := s.exec(ctx, c); err != nil {
 		return groups, fmt.Errorf("mot de passe de %s non défini : %w", u.Login, err)
 	}
 	return groups, nil

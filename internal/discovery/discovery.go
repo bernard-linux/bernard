@@ -195,3 +195,29 @@ func minTime(a, b time.Time) time.Time {
 	}
 	return b
 }
+
+// Wait écoute les balises jusqu'à trouver au moins une cible, sans limite de
+// durée (seule l'annulation de ctx l'interrompt). L'écoute est passive :
+// aucun paquet n'est émis, attendre des heures ne coûte rien au réseau.
+// every, s'il n'est pas nul, est appelé environ chaque minute avec la durée
+// d'attente écoulée, pour rassurer l'utilisateur.
+func Wait(ctx context.Context, port int, every func(time.Duration)) ([]Target, error) {
+	start := time.Now()
+	last := start
+	for {
+		targets, err := Listen(ctx, port, 3*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		if len(targets) > 0 {
+			return targets, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if every != nil && time.Since(last) >= time.Minute {
+			last = time.Now()
+			every(time.Since(start))
+		}
+	}
+}

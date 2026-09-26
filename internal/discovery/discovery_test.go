@@ -39,3 +39,39 @@ func TestAnnounceAndListen(t *testing.T) {
 		t.Fatalf("cible non trouvée : %+v", targets)
 	}
 }
+
+func TestWaitFindsLateTarget(t *testing.T) {
+	probe, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	probe.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// La cible n'apparaît qu'après plusieurs fenêtres d'écoute vides.
+	go func() {
+		time.Sleep(7 * time.Second)
+		Announce(ctx, Beacon{ID: "tard", Name: "cible-tardive", Port: 40001},
+			&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+	}()
+	wctx, wcancel := context.WithTimeout(ctx, 20*time.Second)
+	defer wcancel()
+	targets, err := Wait(wctx, port, nil)
+	if err != nil || len(targets) != 1 || targets[0].Name != "cible-tardive" {
+		t.Fatalf("cible tardive non trouvée : %+v, %v", targets, err)
+	}
+}
+
+func TestWaitStopsOnCancel(t *testing.T) {
+	probe, _ := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	probe.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	begin := time.Now()
+	if _, err := Wait(ctx, port, nil); err == nil {
+		t.Fatal("Wait doit renvoyer une erreur à l'annulation")
+	}
+	if time.Since(begin) > 5*time.Second {
+		t.Fatal("Wait n'a pas réagi à l'annulation")
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/inventory"
+	"github.com/bernard-linux/bernard/internal/keepawake"
 	"github.com/bernard-linux/bernard/internal/link"
 	"github.com/bernard-linux/bernard/internal/pack"
 	"github.com/bernard-linux/bernard/internal/remote"
@@ -28,9 +29,11 @@ import (
 const usage = `bernard-agent — agent source de Bernard, l'assistant de migration vers Linux
 
 Usage :
-  bernard-agent connect [--code 123456] [--target hôte:port]
-      Trouve le nouvel ordinateur sur le réseau (Wi-Fi, câble, Thunderbolt)
-      et lui envoie les données après saisie du code affiché sur celui-ci.
+  bernard-agent connect [--code 123456] [--target hôte:port] [--timeout 2h]
+      Attend le nouvel ordinateur sur le réseau (Wi-Fi, câble, Thunderbolt),
+      aussi longtemps qu'il le faut, puis lui envoie les données après saisie
+      du code affiché sur celui-ci. Peut être lancé avant même d'installer
+      Linux sur le nouvel ordinateur ; la mise en veille est bloquée.
   bernard-agent pack --dest /media/disque/migration
       Écrit un paquet chiffré sur un disque externe.
   bernard-agent inventory [-o inventaire.json] [--no-data]
@@ -137,16 +140,26 @@ func ask(prompt string) string {
 
 // chooseTarget renvoie l'adresse et l'identifiant de la cible choisie.
 func chooseTarget(ctx context.Context) (string, string, error) {
-	fmt.Println("Recherche du nouvel ordinateur (Wi-Fi, câble réseau, Thunderbolt)…")
-	targets, err := discovery.Listen(ctx, 0, 4*time.Second)
+	fmt.Println("En attente du nouvel ordinateur (Wi-Fi, câble réseau, Thunderbolt)…")
+	fmt.Println("Ouvrez Bernard sur le nouvel ordinateur, maintenant ou plus tard : cet ordinateur l'attendra")
+	fmt.Println("aussi longtemps qu'il le faut, sans charger le réseau. Ctrl+C pour abandonner.")
+	targets, err := discovery.Wait(ctx, 0, func(d time.Duration) {
+		fmt.Printf("  toujours en attente (%s)…\n", humanDuration(d))
+		if d >= 5*time.Minute && d < 6*time.Minute {
+			fmt.Println("  Si Bernard est déjà ouvert sur le nouvel ordinateur : les deux sont-ils sur le même réseau ?")
+			fmt.Println("  Sur un Wi-Fi invité ou d'entreprise, reliez-les par un câble ou utilisez --target.")
+		}
+	})
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", "", errors.New("délai dépassé : aucun ordinateur trouvé")
+		}
+		if ctx.Err() != nil {
+			return "", "", errors.New("attente abandonnée")
+		}
 		return "", "", err
 	}
 	switch len(targets) {
-	case 0:
-		return "", "", errors.New("aucun ordinateur trouvé. Vérifiez que Bernard est ouvert sur le nouvel ordinateur, " +
-			"ou reliez les deux par un câble. Sur certains Wi-Fi (invités, entreprise), les appareils ne se voient pas : " +
-			"utilisez --target avec l'adresse affichée sur le nouvel ordinateur")
 	case 1:
 		t := targets[0]
 		fmt.Printf("Trouvé : %s, par %s\n", t.Name, describe(t.Best()))
@@ -166,9 +179,40 @@ func runConnect(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	codeFlag := fs.String("code", "", "code à 6 chiffres affiché sur le nouvel ordinateur")
 	target := fs.String("target", "", "adresse hôte:port du nouvel ordinateur (sinon recherche automatique)")
+	timeout := fs.Duration("timeout", 0, "abandonner si le nouvel ordinateur n'apparaît pas dans ce délai (ex. 2h ; 0 = attendre indéfiniment)")
 	fs.StringVar(&sourceRoot, "root", "/", "racine du système à migrer (disque monté ailleurs)")
 	fs.Parse(args)
 
+	if os.Geteuid() != 0 {
+		fmt.Println("Remarque : lancé sans sudo, l'agent ne lit que vos propres fichiers et les mots de passe")
+		fmt.Println("devront être saisis à nouveau. Pour tout migrer : sudo bernard-agent connect")
+	}
+
+	// Pas de mise en veille tant que l'agent attend ou envoie : un ordinateur
+	// endormi disparaît du réseau.
+	lock := keepawake.Acquire("Migration Bernard : attente du nouvel ordinateur et envoi des données")
+	defer lock.Release()
+	if lock == nil {
+		fmt.Println("Remarque : impossible de bloquer la mise en veille ; désactivez-la le temps de la migration.")
+	}
+
+	addr, targetID := *target, ""
+	if addr == "" {
+		wctx, cancel := ctx, context.CancelFunc(func() {})
+		if *timeout > 0 {
+			wctx, cancel = context.WithTimeout(ctx, *timeout)
+		}
+		var err error
+		addr, targetID, err = chooseTarget(wctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
+
+	// L'inventaire est fait maintenant, et non au lancement : l'attente a pu
+	// durer des heures, et les fichiers ont pu changer entre-temps.
 	inv, err := collect(ctx, false)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Échec de l'inventaire :", err)
@@ -176,18 +220,6 @@ func runConnect(ctx context.Context, args []string) int {
 	}
 	printInventory(inv)
 
-	if os.Geteuid() != 0 {
-		fmt.Println("Remarque : lancé sans sudo, l'agent ne lit que vos propres fichiers et les mots de passe")
-		fmt.Println("devront être saisis à nouveau. Pour tout migrer : sudo bernard-agent connect")
-	}
-
-	addr, targetID := *target, ""
-	if addr == "" {
-		if addr, targetID, err = chooseTarget(ctx); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-	}
 	code := *codeFlag
 	if code == "" {
 		code = ask("Code affiché sur le nouvel ordinateur : ")
@@ -270,6 +302,9 @@ func runPack(ctx context.Context, args []string) int {
 			return 1
 		}
 	}
+	lock := keepawake.Acquire("Migration Bernard : écriture du paquet sur le disque externe")
+	defer lock.Release()
+
 	var files int64
 	var extras any
 	var secrets map[string]string
@@ -314,4 +349,16 @@ func humanBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %co", float64(b)/float64(div), "kMGTPE"[exp])
+}
+
+func humanDuration(d time.Duration) string {
+	d = d.Round(time.Minute)
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%d min", m)
+	case m == 0:
+		return fmt.Sprintf("%d h", h)
+	}
+	return fmt.Sprintf("%d h %02d", h, m)
 }

@@ -30,6 +30,12 @@ Le mot de passe administrateur est demandé, puis l'assistant s'ouvre dans sa
 propre fenêtre. Sur l'**ancien** ordinateur : `sudo bernard-agent connect`,
 puis le code affiché.
 
+L'agent peut être lancé **avant** le nouvel ordinateur, même avant d'y
+installer Linux : il attend sans limite de durée (écoute passive, aucun trafic
+réseau), bloque la mise en veille, et ne fait l'inventaire qu'une fois le
+nouvel ordinateur trouvé, pour envoyer des données à jour. `--timeout 2h`
+fixe une limite ; Ctrl+C abandonne.
+
 Installation à partir des paquets fournis dans `dist/` :
 
 ```sh

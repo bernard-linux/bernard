@@ -33,6 +33,9 @@ Pare-feu : si `sudo ufw status` indique « active » sur la cible, ouvrez
 1. Cible : menu → Bernard. Le mot de passe administrateur est demandé.
 2. Choisir « Depuis un autre ordinateur ». Noter le code.
 3. Source : `sudo bernard-agent connect`. La cible doit être trouvée seule.
+   Variante à tester : lancer l'agent **avant** d'ouvrir Bernard sur la cible
+   (voire avant d'installer Linux) ; il doit attendre, sans que la source se
+   mette en veille, puis trouver la cible dès son apparition.
 4. Saisir le code. Vérifier l'écran de choix : comptes, dossiers, applications.
 5. Lancer, puis pendant le transfert :
    - débrancher le câble réseau si vous êtes en filaire avec le Wi-Fi actif :

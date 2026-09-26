@@ -1,5 +1,13 @@
 # Historique des versions
 
+## 0.2.1 — 27 septembre 2026
+
+- Lien de téléchargement fixe, toujours vers la dernière version :
+  `https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb`
+  (la publication ajoute une copie du paquet sous ce nom).
+- Le README et le guide d'essai indiquent où télécharger le paquet.
+- Aucun changement du programme par rapport à la 0.2.0.
+
 ## 0.2.0 — 27 septembre 2026
 
 **Interface graphique des deux côtés.** Le même programme s'ouvre sur l'ancien

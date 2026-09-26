@@ -10,9 +10,19 @@ c'est justement l'une des choses à tester.
 
 ## 1. Installation (sur les deux machines)
 
+Téléchargez le paquet de la dernière version sur la page
+[Releases](https://github.com/bernard-linux/bernard/releases/latest) du dépôt (fichier `bernard_amd64.deb`), puis
+double-cliquez dessus. Ou, dans un terminal :
+
 ```sh
-sudo apt install ./bernard_*_amd64.deb
+cd /tmp
+wget https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb
+sudo apt install ./bernard_amd64.deb
 ```
+
+Le paquet se télécharge dans `/tmp` plutôt que dans `~/Téléchargements` : apt
+peut alors le lire directement, sans afficher la remarque « téléchargement
+effectué en dehors du bac à sable ».
 
 Un seul paquet, fenêtre dédiée comprise. Sur une machine qui avait la 0.1,
 l'ancien paquet `bernard-window` est retiré automatiquement.

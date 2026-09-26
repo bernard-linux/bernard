@@ -25,8 +25,10 @@ Ubuntu, Zorin OS et Debian avec GNOME ; Linux Mint avec Cinnamon.
 
 ## Utiliser Bernard
 
-Installez le même paquet sur les **deux** ordinateurs (double-clic sur le
-fichier, ou `sudo apt install ./bernard_*.deb`), puis ouvrez **Bernard** depuis
+Téléchargez le paquet sur la page [Releases](https://github.com/bernard-linux/bernard/releases/latest)
+(fichier `bernard_amd64.deb`, [lien direct](https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb)) et
+installez-le sur les **deux** ordinateurs (double-clic sur le fichier, ou
+`sudo apt install ./bernard_amd64.deb`), puis ouvrez **Bernard** depuis
 le menu des applications, sur chacun, dans l'ordre que vous voulez. Aucun
 terminal n'est nécessaire.
 

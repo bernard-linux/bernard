@@ -53,8 +53,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: deb, path: dist }
-      - name: Empreintes
-        run: cd dist && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
+      # Copie au nom fixe : le lien « releases/latest/download/bernard_amd64.deb »
+      # désigne ainsi toujours la dernière version.
+      - name: Nom fixe et empreintes
+        run: cd dist && cp bernard_*_amd64.deb bernard_amd64.deb && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
       - name: Créer la page de téléchargement
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,11 +66,13 @@ jobs:
           cat > notes.md <<'NOTES'
           ## Installer
 
-          Sur les **deux** ordinateurs (ancien et nouveau), téléchargez `bernard_*_amd64.deb`, puis
+          Sur les **deux** ordinateurs (ancien et nouveau), téléchargez `bernard_amd64.deb` ci-dessous, puis
           double-cliquez dessus, ou dans un terminal :
 
           ```sh
-          sudo apt install ./bernard_*_amd64.deb
+          cd /tmp
+          wget https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb
+          sudo apt install ./bernard_amd64.deb
           ```
 
           Un seul fichier pour Zorin OS 17 et 18, Linux Mint 21 et 22, Ubuntu 22.04 et 24.04, Debian 12.

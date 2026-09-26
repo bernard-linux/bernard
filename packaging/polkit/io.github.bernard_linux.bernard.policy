@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Bernard</vendor>
+  <vendor_url>https://github.com/bernard-linux/bernard</vendor_url>
+  <icon_name>bernard</icon_name>
+  <action id="io.github.bernard_linux.bernard.migrate">
+    <description>Transfer accounts, applications and files from another computer</description>
+    <description xml:lang="fr">Transférer comptes, applications et fichiers depuis un autre ordinateur</description>
+    <message>Bernard needs administrator rights to create accounts and install applications.</message>
+    <message xml:lang="fr">Bernard a besoin des droits administrateur pour créer les comptes et installer les applications.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/bernard</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">ui</annotate>
+  </action>
+</policyconfig>

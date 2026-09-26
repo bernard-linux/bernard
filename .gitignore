@@ -1,0 +1,6 @@
+/bin/
+*.part
+inventaire.json
+plan.json
+/dist/
+.DS_Store

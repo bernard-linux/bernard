@@ -1,0 +1,7 @@
+# Redirection : webview_go demande WebKitGTK 4.0, que les distributions
+# récentes (Ubuntu 24.04, Zorin 18, Mint 22) ne fournissent plus. L'API
+# utilisée par la fenêtre est identique en 4.1.
+Name: webkit2gtk-4.0 (redirigé vers 4.1)
+Description: redirection vers webkit2gtk-4.1
+Version: 2.40
+Requires: webkit2gtk-4.1

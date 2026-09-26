@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bernard — assistant de migration</title>
+<link rel="icon" href="shell.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="frame">
+  <aside class="rail" aria-label="Étapes">
+    <div class="brand">
+      <img src="shell.svg" alt="" width="36" height="36">
+      <span>Bernard</span>
+    </div>
+    <ol class="steps" id="steps">
+      <li data-step="1">Source</li>
+      <li data-step="2">Connexion</li>
+      <li data-step="3">Analyse</li>
+      <li data-step="4">Choix</li>
+      <li data-step="5">Migration</li>
+      <li data-step="6">Bilan</li>
+    </ol>
+    <p class="rail-note">Rien n'est jamais modifié sur l'ancien ordinateur.</p>
+  </aside>
+  <main id="main" tabindex="-1">
+    <p class="loading">Démarrage…</p>
+  </main>
+</div>
+<dialog id="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button value="cancel" class="quiet">Revenir</button>
+      <button value="ok" id="confirm-ok" class="primary"></button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

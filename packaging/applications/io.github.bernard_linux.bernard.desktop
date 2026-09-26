@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Bernard
+Name[fr]=Bernard
+GenericName=Migration Assistant
+GenericName[fr]=Assistant de migration
+Comment=Bring your accounts, files and apps from another computer
+Comment[fr]=Transférer comptes, fichiers et applications depuis un autre ordinateur
+Exec=bernard gui
+Icon=bernard
+Terminal=false
+Categories=System;Settings;
+Keywords=migration;transfer;import;windows;mac;
+Keywords[fr]=migration;transfert;importer;ancien ordinateur;
+StartupNotify=true

@@ -1,0 +1,292 @@
+package settings
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/bernard-linux/bernard/internal/sysexec"
+	"github.com/bernard-linux/bernard/internal/transfer"
+)
+
+// ErrSkipped signale un réglage volontairement non appliqué (déjà présent,
+// ou à faire à la main) ; ce n'est pas une panne.
+var ErrSkipped = errors.New("non appliqué")
+
+var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// Applier applique les réglages. Exec est remplacé dans les tests.
+type Applier struct {
+	Exec     sysexec.Executor
+	StateDir string // sauvegardes pour l'annulation
+	NMDir    string // /etc/NetworkManager/system-connections
+}
+
+// New renvoie l'Applier réel.
+func New(stateDir string) *Applier {
+	return &Applier{Exec: sysexec.Run, StateDir: stateDir, NMDir: "/etc/NetworkManager/system-connections"}
+}
+
+// asUser lance une commande avec l'identité d'un utilisateur, dans une
+// session D-Bus privée (dconf écrit par son service D-Bus, même si
+// l'utilisateur n'est pas connecté).
+func (a *Applier) asUser(ctx context.Context, login, home, stdin string, args ...string) (string, error) {
+	if !loginRe.MatchString(login) {
+		return "", fmt.Errorf("identifiant refusé : %q", login)
+	}
+	full := append([]string{"-u", login, "--", "env", "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"dbus-run-session", "--"}, args...)
+	return a.Exec(ctx, sysexec.Cmd{Name: "runuser", Args: full, Stdin: stdin})
+}
+
+// ApplyDconf sauvegarde les réglages actuels du compte puis charge ceux de
+// la source. Renvoie le chemin de la sauvegarde, pour l'annulation.
+func (a *Applier) ApplyDconf(ctx context.Context, login, home string, d Dump) (string, error) {
+	ini := d.String()
+	if strings.TrimSpace(ini) == "" {
+		return "", ErrSkipped
+	}
+	current, err := a.asUser(ctx, login, home, "", "dconf", "dump", "/")
+	if err != nil {
+		return "", fmt.Errorf("lecture des réglages actuels de %s : %w", login, err)
+	}
+	backup := filepath.Join(a.StateDir, "dconf-"+login+".ini")
+	if err := os.MkdirAll(a.StateDir, 0o700); err != nil {
+		return "", err
+	}
+	// Une sauvegarde existante (session précédente) est la vraie version
+	// d'origine : on ne l'écrase pas.
+	if _, err := os.Stat(backup); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(backup, []byte(current), 0o600); err != nil {
+			return "", err
+		}
+	}
+	if _, err := a.asUser(ctx, login, home, ini, "dconf", "load", "/"); err != nil {
+		return backup, err
+	}
+	return backup, nil
+}
+
+// RestoreDconf remet les réglages sauvegardés avant la migration.
+func (a *Applier) RestoreDconf(ctx context.Context, login, home, backup string) error {
+	b, err := os.ReadFile(backup)
+	if err != nil {
+		return err
+	}
+	if _, err := a.asUser(ctx, login, home, "", "dconf", "reset", "-f", "/"); err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(b))) > 0 {
+		_, err = a.asUser(ctx, login, home, string(b), "dconf", "load", "/")
+	}
+	return err
+}
+
+// ---------------------------------------------------------------- Wi-Fi
+
+// SanitizeWifi vérifie qu'un fichier NetworkManager est bien une connexion
+// Wi-Fi et retire ce qui dépend de l'ancienne machine (nom d'interface,
+// restriction à un compte absent). Renvoie le contenu nettoyé, le nom et
+// l'UUID de la connexion.
+func SanitizeWifi(content string, userExists func(string) bool) (string, string, string, error) {
+	var out []string
+	section, typ, id, uuid := "", "", "", ""
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := sc.Text()
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			section = t
+			out = append(out, line)
+			continue
+		}
+		k, v, _ := strings.Cut(t, "=")
+		if section == "[connection]" {
+			switch k {
+			case "type":
+				typ = v
+			case "id":
+				id = v
+			case "uuid":
+				uuid = v
+			case "interface-name":
+				continue // la carte Wi-Fi n'a pas le même nom ici
+			case "permissions":
+				if !permissionsOK(v, userExists) {
+					continue // réservée à un compte absent : ouverte à tous
+				}
+			}
+		}
+		out = append(out, line)
+	}
+	if typ != "wifi" && typ != "802-11-wireless" {
+		return "", "", "", fmt.Errorf("%w : pas une connexion Wi-Fi", ErrSkipped)
+	}
+	if id == "" || !regexp.MustCompile(`^[0-9a-fA-F-]{36}$`).MatchString(uuid) {
+		return "", "", "", errors.New("connexion Wi-Fi incomplète")
+	}
+	return strings.Join(out, "\n") + "\n", id, uuid, nil
+}
+
+func permissionsOK(v string, userExists func(string) bool) bool {
+	for _, p := range strings.Split(v, ";") {
+		if u, ok := strings.CutPrefix(p, "user:"); ok && u != "" && (userExists == nil || !userExists(u)) {
+			return false
+		}
+	}
+	return true
+}
+
+var safeFile = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// InstallWifi ajoute une connexion Wi-Fi si aucune connexion de même UUID
+// n'existe. Renvoie le fichier créé, pour l'annulation.
+func (a *Applier) InstallWifi(ctx context.Context, c NMConnection, userExists func(string) bool) (string, error) {
+	content, id, uuid, err := SanitizeWifi(c.Content, userExists)
+	if err != nil {
+		return "", err
+	}
+	if out, err := a.Exec(ctx, sysexec.Cmd{Name: "nmcli", Args: []string{"-t", "-f", "UUID", "connection", "show"}}); err == nil {
+		for _, l := range sysexec.Lines(out) {
+			if l == uuid {
+				return "", fmt.Errorf("%w : « %s » existe déjà", ErrSkipped, id)
+			}
+		}
+	}
+	name := safeFile.ReplaceAllString(id, "_")
+	path := filepath.Join(a.NMDir, "bernard-"+name+".nmconnection")
+	if err := os.MkdirAll(a.NMDir, 0o755); err != nil {
+		return "", err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	f.Close()
+	a.Exec(ctx, sysexec.Cmd{Name: "nmcli", Args: []string{"connection", "reload"}})
+	return path, nil
+}
+
+// RemoveWifi retire une connexion ajoutée par Bernard.
+func (a *Applier) RemoveWifi(ctx context.Context, path string) error {
+	if filepath.Dir(path) != a.NMDir || !strings.HasPrefix(filepath.Base(path), "bernard-") {
+		return fmt.Errorf("fichier refusé : %s", path)
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	a.Exec(ctx, sysexec.Cmd{Name: "nmcli", Args: []string{"connection", "reload"}})
+	return nil
+}
+
+// ---------------------------------------------------------------- crontab
+
+// InstallCrontab reprend les tâches planifiées d'un compte, s'il n'en a pas
+// déjà sur la cible.
+func (a *Applier) InstallCrontab(ctx context.Context, login, content string) error {
+	if !loginRe.MatchString(login) {
+		return fmt.Errorf("identifiant refusé : %q", login)
+	}
+	if strings.TrimSpace(content) == "" {
+		return ErrSkipped
+	}
+	if out, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-l"}}); err == nil && strings.TrimSpace(out) != "" {
+		return fmt.Errorf("%w : %s a déjà des tâches planifiées ici", ErrSkipped, login)
+	}
+	_, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-"}, Stdin: content})
+	return err
+}
+
+// RemoveCrontab retire les tâches reprises par Bernard.
+func (a *Applier) RemoveCrontab(ctx context.Context, login string) error {
+	if !loginRe.MatchString(login) {
+		return fmt.Errorf("identifiant refusé : %q", login)
+	}
+	_, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-r"}})
+	return err
+}
+
+// ---------------------------------------------------------------- imprimantes
+
+var printerRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,127}$`)
+
+// Imprimantes réseau réinstallables sans pilote (IPP Everywhere / AirPrint).
+var networkSchemes = []string{"ipp://", "ipps://", "dnssd://", "http://", "https://"}
+
+// AddPrinter réinstalle une imprimante réseau en mode sans pilote. Les
+// imprimantes USB ou à pilote propriétaire restent à faire à la main.
+func (a *Applier) AddPrinter(ctx context.Context, p Printer) error {
+	if !printerRe.MatchString(p.Name) {
+		return fmt.Errorf("nom d'imprimante refusé : %q", p.Name)
+	}
+	network := false
+	for _, s := range networkSchemes {
+		if strings.HasPrefix(p.URI, s) {
+			network = true
+		}
+	}
+	if !network || strings.ContainsAny(p.URI, " \n") {
+		return fmt.Errorf("%w : %s n'est pas une imprimante réseau, à installer depuis les réglages d'impression", ErrSkipped, p.Name)
+	}
+	if _, err := a.Exec(ctx, sysexec.Cmd{Name: "lpstat", Args: []string{"-p", p.Name}}); err == nil {
+		return fmt.Errorf("%w : %s existe déjà", ErrSkipped, p.Name)
+	}
+	if _, err := a.Exec(ctx, sysexec.Cmd{Name: "lpadmin", Args: []string{"-p", p.Name, "-E", "-v", p.URI, "-m", "everywhere"}}); err != nil {
+		return err
+	}
+	if p.Default {
+		a.Exec(ctx, sysexec.Cmd{Name: "lpadmin", Args: []string{"-d", p.Name}})
+	}
+	return nil
+}
+
+// RemovePrinter retire une imprimante ajoutée par Bernard.
+func (a *Applier) RemovePrinter(ctx context.Context, name string) error {
+	if !printerRe.MatchString(name) {
+		return fmt.Errorf("nom d'imprimante refusé : %q", name)
+	}
+	_, err := a.Exec(ctx, sysexec.Cmd{Name: "lpadmin", Args: []string{"-x", name}})
+	return err
+}
+
+// ---------------------------------------------------------------- dossier neuf
+
+// ClearPristineSkeleton retire d'un dossier personnel NEUF les fichiers
+// modèles (.bashrc, .profile…) restés identiques à ceux de /etc/skel, pour
+// que les versions de l'ancien ordinateur prennent leur place au lieu d'être
+// renommées. Un fichier modifié, même d'un octet, est conservé. Ces modèles
+// sont régénérables à tout moment depuis /etc/skel.
+func ClearPristineSkeleton(home, skel string) ([]string, error) {
+	var removed []string
+	err := filepath.WalkDir(skel, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		rel, _ := filepath.Rel(skel, p)
+		dst := filepath.Join(home, rel)
+		fi, err := os.Lstat(dst)
+		if err != nil || !fi.Mode().IsRegular() {
+			return nil
+		}
+		a, _, err1 := transfer.HashFile(p)
+		b, _, err2 := transfer.HashFile(dst)
+		if err1 == nil && err2 == nil && a == b {
+			if os.Remove(dst) == nil {
+				removed = append(removed, rel)
+			}
+		}
+		return nil
+	})
+	return removed, err
+}

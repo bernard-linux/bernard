@@ -27,16 +27,19 @@ jobs:
         with: { go-version: "1.22" }
       - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev pkg-config
       - name: Construire les paquets
+        run: packaging/deb/build.sh "${GITHUB_REF_NAME#v}"
+      # Vérification avec les deux paquets, avant tout tri : la fenêtre
+      # dépend du paquet « bernard ».
+      - name: Vérifier l'installation
+        run: sudo apt-get install -y ./dist/*.deb && bernard version && test -x /usr/bin/bernard-window
+      - name: Nommer les fichiers
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          packaging/deb/build.sh "$VERSION"
           cd dist
           # Nom distinct par base pour la fenêtre ; le paquet « bernard » est
           # identique partout (binaire autonome), on ne garde que celui de 24.04.
           for f in bernard-window_*.deb; do mv "$f" "${f%.deb}_${{ matrix.label }}.deb"; done
           if [ "${{ matrix.label }}" != ubuntu24.04 ]; then rm -f bernard_*.deb; fi
-      - name: Vérifier l'installation
-        run: sudo apt-get install -y ./dist/*.deb && bernard version
+          ls -l
       - uses: actions/upload-artifact@v4
         with:
           name: deb-${{ matrix.label }}

@@ -89,11 +89,14 @@ type Hooks struct {
 
 // Result est le bilan d'une exécution.
 type Result struct {
-	System      *apply.Report                   `json:"system"`
-	Settings    *apply.SettingsReport           `json:"settings,omitempty"`
-	Data        map[string]*transfer.TreeReport `json:"data"`
-	JournalPath string                          `json:"journalPath"`
-	ReportPath  string                          `json:"reportPath"`
+	System   *apply.Report                   `json:"system"`
+	Settings *apply.SettingsReport           `json:"settings,omitempty"`
+	Data     map[string]*transfer.TreeReport `json:"data"`
+	// Replaced : fichiers de profil (trousseau, navigateurs) de l'ancien
+	// ordinateur mis à la place de ceux, neufs, du nouveau.
+	Replaced    []string `json:"replaced,omitempty"`
+	JournalPath string   `json:"journalPath"`
+	ReportPath  string   `json:"reportPath"`
 }
 
 // OK indique une migration sans aucun élément manqué.
@@ -203,7 +206,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 		}
 	}
 	r := &engine.Receiver{Src: src, Journal: j, State: st, OnProgress: h.Progress}
-	res.Data, err = apply.CopyData(ctx, r, s.Plan, s.Inv, created)
+	res.Data, res.Replaced, err = apply.CopyData(ctx, r, s.Plan, s.Inv, created)
 	if err != nil {
 		return res, err
 	}
@@ -234,6 +237,9 @@ func Undo(ctx context.Context, journalPath string) (*engine.UndoReport, *apply.U
 	if err != nil {
 		return nil, nil, err
 	}
+	// Les profils échangés reprennent d'abord leur place, pour que
+	// l'annulation des fichiers retrouve les copies sous leur nom d'origine.
+	prefErrs := apply.UndoPreferSource(st)
 	files, err := engine.Undo(journalPath)
 	if err != nil {
 		return nil, nil, err
@@ -241,6 +247,7 @@ func Undo(ctx context.Context, journalPath string) (*engine.UndoReport, *apply.U
 	var sys *apply.UndoReport
 	if len(st.Sys) > 0 {
 		sys = apply.UndoSystem(ctx, st, system.New(), settings.New(filepath.Dir(journalPath)))
+		sys.Errors = append(sys.Errors, prefErrs...)
 	}
 	return files, sys, nil
 }

@@ -1,5 +1,66 @@
 # Historique des versions
 
+## 0.3.0 — 27 septembre 2026
+
+Corrections issues du premier essai réel Zorin OS → Zorin OS (deux PC
+différents). **Installez la 0.3.0 sur les deux ordinateurs** : l'ancien
+ordinateur doit aussi l'avoir pour que les nouveautés marquées (★)
+fonctionnent.
+
+**Navigateurs**
+
+- (★) Les verrous des navigateurs ne sont plus copiés (`SingletonLock` de
+  Brave, Chrome, Chromium, Edge, Vivaldi ; `lock` et `.parentlock` de
+  Firefox et Thunderbird). Ils désignaient l'ancien ordinateur et pouvaient
+  empêcher le navigateur de démarrer.
+- (★) Les caches graphiques des navigateurs (`GPUCache`, `ShaderCache`,
+  `GrShaderCache`…) et leurs autres caches ne sont plus copiés : compilés
+  pour la carte graphique de l'ancien ordinateur, ils pouvaient faire
+  planter le démarrage sur une autre carte. Favoris, historique, mots de
+  passe, extensions, cookies et réglages sont bien repris. Versions paquet,
+  Flatpak et Snap.
+- Compte qui existait déjà sur un système fraîchement installé (moins de
+  45 jours) : le trousseau de clés et les fichiers de profil des navigateurs
+  de l'ancien ordinateur prennent la place de ceux, vierges, du nouveau, au
+  lieu d'arriver sous un nom « (bernard 1) ». Sans cela, les mots de passe
+  enregistrés dans Brave, Chrome ou Chromium restaient illisibles, et
+  Firefox pouvait continuer d'utiliser un profil vide. Les fichiers du
+  nouvel ordinateur sont gardés dans `~/.local/share/bernard/avant-migration`,
+  et « Annuler la migration » les remet en place.
+- Écran de fin : bouton « Redémarrer maintenant » ; le trousseau et les
+  réglages du bureau ne sont pris en compte qu'à la session suivante.
+
+**Chaque ordinateur garde ce qui tient à son matériel**
+
+- La disposition du clavier n'est plus reprise quand les deux ordinateurs
+  n'ont pas le même clavier (clavier français → clavier belge, par exemple) :
+  celle choisie à l'installation reste. Une case, dans « Options avancées »,
+  permet de reprendre celle de l'ancien.
+- Les profils de couleur des écrans ne sont plus repris.
+- Pilotes graphiques (NVIDIA…), micrologiciels, noyaux, amorçage, outils de
+  machines virtuelles : jamais installés depuis l'ancien ordinateur, jamais
+  retirés du nouveau. L'écran « Options avancées » indique les cartes
+  graphiques des deux ordinateurs.
+
+**Retrait des applications que vous aviez supprimées**
+
+- (★) L'ancien ordinateur envoie la liste complète de ses paquets et, d'après
+  le journal de dpkg, ceux qu'il a retirés et quand.
+- Le nouvel ordinateur propose de retirer les applications du menu qu'il a
+  reçues d'office à l'installation mais que l'ancien n'a pas. Une ligne sur
+  l'écran de choix l'annonce (« 3 applications … seront retirées d'ici,
+  25 Mo libérés ») ; le détail, case par case, est dans « Options avancées ».
+- Garde-fous : même distribution des deux côtés ; seulement des applications
+  du menu, jamais des bibliothèques ; jamais un pilote, un élément du système
+  ou du bureau, ni un paquet protégé ; simulation apt avant de proposer, et
+  aucun retrait qui emporterait un paquet présent sur l'ancien ordinateur.
+  Non cochés d'office : les retraits qui emportent d'autres paquets, et ceux
+  entre deux versions différentes du système (sauf retrait attesté par le
+  journal de l'ancien).
+- La place libérée compte dans le calcul de l'espace disponible.
+- Retrait simple (`apt remove`, jamais `purge`), fait avant les
+  installations. « Annuler la migration » réinstalle ce qui a été retiré.
+
 ## 0.2.1 — 27 septembre 2026
 
 - Lien de téléchargement fixe, toujours vers la dernière version :

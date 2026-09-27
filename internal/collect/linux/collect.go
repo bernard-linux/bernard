@@ -78,6 +78,8 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	for i := range inv.Apps {
 		inv.Apps[i].ID = "a" + strconv.Itoa(i+1)
 	}
+	inv.Packages = allPackages(opt.Root)
+	inv.PackagesRemoved = removedPackages(opt.Root, inv.Packages)
 
 	if wifi := wifiFromFiles(opt.Root); len(wifi) > 0 || offline {
 		inv.Network.Wifi = wifi

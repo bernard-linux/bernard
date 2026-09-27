@@ -54,9 +54,16 @@ Tout se fait dans l'interface graphique, sur les deux machines.
 6. Tester « Arrêter » sur la source : la cible affiche un nouveau code ;
    « Reprendre » sur la source, saisir ce code, l'envoi reprend sans renvoyer
    ce qui est déjà arrivé.
-7. Au bilan : se déconnecter, se connecter avec le compte migré, vérifier
-   fichiers, mot de passe, applications (dont une Flatpak), fond d'écran,
-   disposition du clavier, dock, Wi-Fi mémorisé, imprimante réseau.
+7. Au bilan : « Redémarrer maintenant », se connecter avec le compte migré,
+   vérifier fichiers, mot de passe, applications (dont une Flatpak), fond
+   d'écran, dock, Wi-Fi mémorisé, imprimante réseau. La disposition du
+   clavier doit être celle choisie à l'installation du nouvel ordinateur
+   (sauf case cochée dans « Options avancées »).
+   Navigateurs : chaque navigateur démarre du premier coup ; favoris
+   présents ; **mots de passe enregistrés lisibles** (Brave/Chrome :
+   Paramètres → Mots de passe ; Firefox : about:logins).
+   Applications retirées : celles cochées dans « Options avancées » ont
+   disparu du menu, les autres sont restées.
 8. Relancer Bernard et tester « Annuler la migration » sur une migration,
    si la machine peut être remise à zéro.
 

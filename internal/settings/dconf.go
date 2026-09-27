@@ -113,7 +113,6 @@ var gnomeKeep = []string{
 	"org/gnome/desktop/a11y",
 	"org/gnome/desktop/session",
 	"org/gnome/settings-daemon/plugins/power",
-	"org/gnome/settings-daemon/plugins/color",
 	"org/gnome/settings-daemon/plugins/media-keys",
 	"org/gnome/shell/favorite-apps",
 	"org/gnome/nautilus/preferences",
@@ -181,9 +180,27 @@ func Fidelity(src, dst string) string {
 	return "none"
 }
 
+// Chemins propres au clavier physique : repris seulement si l'utilisateur
+// le demande, ou si les deux ordinateurs ont la même disposition.
+var keyboardPaths = []string{"org/gnome/desktop/input-sources", "org/gnome/libgnomekbd/keyboard"}
+
 // Translate filtre (et traduit si besoin) une sortie dconf de la source pour
 // le bureau de la cible. themeExists écarte les thèmes absents de la cible.
-func Translate(in Dump, src, dst string, themeExists func(kind, name string) bool) Dump {
+// keepKeyboard reprend la disposition du clavier de la source ; sinon celle
+// de la cible, choisie à son installation, reste en place.
+func Translate(in Dump, src, dst string, themeExists func(kind, name string) bool, keepKeyboard bool) Dump {
+	out := translate(in, src, dst, themeExists)
+	if !keepKeyboard {
+		for p := range out {
+			if keep(p, keyboardPaths) {
+				delete(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func translate(in Dump, src, dst string, themeExists func(kind, name string) bool) Dump {
 	out := Dump{}
 	switch {
 	case src == dst && src == "gnome":

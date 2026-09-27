@@ -37,6 +37,15 @@ const (
 	SysPrinterAdded = "printerAdded" // Name = imprimante
 	SysCrontabSet   = "crontabSet"   // Name = identifiant
 	SysDconfApplied = "dconfApplied" // Name = identifiant, Dst = sauvegarde
+	// SysPreferSource : fichier de profil de l'ancien ordinateur mis à la
+	// place de celui du nouveau. Name = nom de conflit d'origine, Dst = nom
+	// final, Key = emplacement où la version du nouveau a été mise de côté.
+	SysPreferSource = "preferSource"
+	// SysAptRemoved : paquet retiré de la cible à la demande (application
+	// que l'utilisateur avait supprimée de l'ancien ordinateur).
+	SysAptRemoved = "aptRemoved"
+	// SysFlatpakRemoved : idem pour une application Flatpak.
+	SysFlatpakRemoved = "flatpakRemoved"
 )
 
 // Record est une ligne du journal.

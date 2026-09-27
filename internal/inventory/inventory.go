@@ -25,6 +25,14 @@ type Inventory struct {
 	Apps      []App     `json:"apps"`
 	DataSets  []DataSet `json:"dataSets"`
 	Network   Network   `json:"network"`
+	// Packages liste TOUS les paquets apt installés (pas seulement ceux
+	// installés à la main) : la cible s'en sert pour repérer les
+	// applications que l'utilisateur avait retirées. Vide avec un agent
+	// antérieur à la 0.3 : la proposition de retrait est alors désactivée.
+	Packages []string `json:"packages,omitempty"`
+	// PackagesRemoved : paquets retirés d'après le journal de dpkg, avec la
+	// date du retrait (AAAA-MM-JJ). Le journal ne remonte qu'à un an environ.
+	PackagesRemoved map[string]string `json:"packagesRemoved,omitempty"`
 	// Warnings liste ce que l'agent n'a pas pu inventorier, pour le rapport.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -37,6 +45,10 @@ type Source struct {
 	Desktop  string `json:"desktop,omitempty"` // gnome, cinnamon, kde…
 	Hostname string `json:"hostname"`
 	Snapshot string `json:"snapshot"` // vss, apfs, btrfs, lvm, none
+	// Keyboard : disposition du clavier du système (« fr », « be »…).
+	Keyboard string `json:"keyboard,omitempty"`
+	// GPUs : fabricants des cartes graphiques (« intel », « nvidia »…).
+	GPUs []string `json:"gpus,omitempty"`
 }
 
 // User est un compte humain de la machine source.

@@ -187,3 +187,50 @@ func TestOfflineRootReadsItsOwnApps(t *testing.T) {
 		t.Errorf("%d commandes lancées pour un système hors ligne", calls)
 	}
 }
+
+func TestBrowserExcludes(t *testing.T) {
+	cases := map[string]bool{
+		".config/BraveSoftware/Brave-Browser/SingletonLock":                              true,
+		".config/BraveSoftware/Brave-Browser/SingletonSocket":                            true,
+		".config/BraveSoftware/Brave-Browser/Default/GPUCache/data_0":                    true,
+		".config/BraveSoftware/Brave-Browser/GrShaderCache/x":                            true,
+		".config/google-chrome/Profile 1/Code Cache/js/a":                                true,
+		".mozilla/firefox/abcd.default-release/lock":                                     true,
+		".mozilla/firefox/abcd.default-release/.parentlock":                              true,
+		".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser/Default/GPUCache": true,
+		// Conservés : mots de passe, favoris, clés.
+		".config/BraveSoftware/Brave-Browser/Default/Login Data": false,
+		".config/BraveSoftware/Brave-Browser/Default/Bookmarks":  false,
+		".config/BraveSoftware/Brave-Browser/Local State":        false,
+		".mozilla/firefox/abcd.default-release/logins.json":      false,
+		".mozilla/firefox/abcd.default-release/key4.db":          false,
+		".mozilla/firefox/abcd.default-release/places.sqlite":    false,
+		".local/share/keyrings/login.keyring":                    false,
+	}
+	for rel, want := range cases {
+		if got := excluded(rel, DefaultExcludes); got != want {
+			t.Errorf("%s : exclu = %v, attendu %v", rel, got, want)
+		}
+	}
+}
+
+func TestRemovedPackages(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "var/lib/dpkg"), 0o755)
+	os.MkdirAll(filepath.Join(root, "var/log"), 0o755)
+	os.WriteFile(filepath.Join(root, "var/lib/dpkg/status"), []byte(
+		"Package: gimp\nStatus: install ok installed\n\nPackage: cheese\nStatus: install ok installed\n\nPackage: old\nStatus: deinstall ok config-files\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "var/log/dpkg.log"), []byte(
+		"2026-03-01 10:00:00 remove rhythmbox:amd64 3.4.7 <none>\n"+
+			"2026-03-02 10:00:00 remove cheese:amd64 44 <none>\n"+ // réinstallé depuis
+			"2026-03-03 10:00:00 install cheese:amd64 <none> 44\n"+
+			"2026-03-04 10:00:00 purge old:amd64 1 <none>\n"), 0o644)
+	pk := allPackages(root)
+	if len(pk) != 2 || pk[0] != "cheese" || pk[1] != "gimp" {
+		t.Fatalf("paquets = %v", pk)
+	}
+	rm := removedPackages(root, pk)
+	if rm["rhythmbox"] != "2026-03-01" || rm["old"] != "2026-03-04" || rm["cheese"] != "" {
+		t.Fatalf("retirés = %v", rm)
+	}
+}

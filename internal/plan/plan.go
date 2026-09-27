@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/hardware"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/settings"
 )
@@ -28,6 +29,8 @@ const (
 	OpImportWifi   = "importWifi"   // importer une connexion Wi-Fi
 	OpSettings     = "settings"     // réglages du bureau et tâches planifiées d'un compte
 	OpAddPrinter   = "addPrinter"   // réinstaller une imprimante réseau
+	OpRemove       = "remove"       // retirer une application absente de l'ancien ordinateur
+	OpKeyboard     = "keyboard"     // reprendre la disposition du clavier de l'ancien ordinateur
 	OpSkip         = "skip"         // rien à faire (déjà présent, technique…)
 	OpReview       = "review"       // action manuelle proposée à l'utilisateur
 )
@@ -48,6 +51,11 @@ const (
 	ReasonNotEnoughSpace   = "notEnoughSpace"
 	ReasonPrinterSetup     = "printerNeedsSetup"
 	ReasonDesktopMismatch  = "desktopMismatch" // bureaux différents : seules les tâches planifiées suivent
+	ReasonHardware         = "hardware"        // pilote, micrologiciel, noyau : propre à chaque machine
+	// Raisons d'un retrait proposé.
+	ReasonRemovedOnSource = "removedOnSource" // retiré de l'ancien ordinateur (journal de dpkg)
+	ReasonAbsentOnSource  = "absentOnSource"  // absent de l'ancien ordinateur, même version du système
+	ReasonAbsentOlder     = "absentOlder"     // absent de l'ancien, dont le système est d'une autre version
 )
 
 // Action est une opération du plan. Selected permet à l'interface de cocher
@@ -67,7 +75,12 @@ type Action struct {
 	Fidelity   string `json:"fidelity,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Suggestion string `json:"suggestion,omitempty"`
-	Selected   bool   `json:"selected"`
+	// Also : autres paquets que retirerait un retrait (OpRemove).
+	Also []string `json:"also,omitempty"`
+	// Date : date du retrait sur l'ancien ordinateur (OpRemove), ou
+	// disposition du clavier de l'ancien ordinateur (OpKeyboard).
+	Date     string `json:"date,omitempty"`
+	Selected bool   `json:"selected"`
 }
 
 // Target décrit l'état de la machine cible, relevé par DetectTarget.
@@ -83,6 +96,21 @@ type Target struct {
 	FlatpakReady     bool              `json:"flatpakReady"`
 	FlatpakInstalled map[string]bool   `json:"-"`
 	SnapInstalled    map[string]bool   `json:"-"`
+	Keyboard         string            `json:"keyboard,omitempty"`
+	GPUs             []string          `json:"gpus,omitempty"`
+	// Pour proposer le retrait des applications absentes de la source.
+	AptManual map[string]bool `json:"-"`
+	// AptApps : paquet → nom de l'application qu'il affiche dans le menu.
+	AptApps map[string]string `json:"-"`
+	// AptProtected : paquets indispensables au système ou au bureau.
+	AptProtected map[string]bool `json:"-"`
+	// AptSize : place occupée par paquet, en octets.
+	AptSize map[string]int64 `json:"-"`
+	// RemovalImpact renvoie tout ce qu'apt retirerait avec ce paquet (lui
+	// compris), sans rien faire (simulation).
+	RemovalImpact func(pkg string) ([]string, error) `json:"-"`
+	// FlatpakNames : identifiant → nom, pour les applications Flatpak de la cible.
+	FlatpakNames map[string]string `json:"-"`
 }
 
 // Totals résume le volume à transférer.
@@ -99,6 +127,8 @@ type Plan struct {
 	Target    Target    `json:"target"`
 	Actions   []Action  `json:"actions"`
 	Totals    Totals    `json:"totals"`
+	// Freed : place libérée par les retraits sélectionnés.
+	Freed int64 `json:"freed,omitempty"`
 	// Blocked empêche le démarrage (espace insuffisant…) ; Reason explique.
 	Blocked bool   `json:"blocked"`
 	Reason  string `json:"reason,omitempty"`
@@ -147,6 +177,11 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	for _, a := range installs {
 		add(a)
 	}
+	// 2 bis. Applications que l'utilisateur avait retirées de l'ancien
+	// ordinateur mais que l'installation du nouveau a remises.
+	for _, a := range removals(inv, t) {
+		add(a)
+	}
 
 	// 3. Données.
 	for _, d := range inv.DataSets {
@@ -170,6 +205,13 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 			a.Selected = true
 		}
 		add(a)
+		// Clavier : chaque ordinateur garde la disposition choisie à son
+		// installation (clavier physique différent). Reprendre celle de
+		// l'ancien reste possible, dans les options avancées.
+		if fid != FidelityNone && inv.Source.Keyboard != t.Keyboard {
+			add(Action{Op: OpKeyboard, From: u.ID, Login: u.Login, Label: u.Login,
+				Date: inv.Source.Keyboard, Fidelity: fid, Selected: false})
+		}
 	}
 
 	// 5. Réseau et imprimantes.
@@ -195,6 +237,8 @@ func appAction(app inventory.App, t Target) Action {
 	switch app.Origin {
 	case inventory.OriginApt:
 		switch {
+		case hardware.HardwarePackage(app.Name):
+			a.Op, a.Reason, a.Selected = OpSkip, ReasonHardware, false
 		case t.AptInstalled[app.Name]:
 			a.Op, a.Reason = OpSkip, ReasonAlreadyInstalled
 		case t.AptAvailable != nil && t.AptAvailable(app.Name):
@@ -244,12 +288,16 @@ func (p *Plan) Recheck() {
 // checkSpace bloque le plan si les données sélectionnées ne tiennent pas.
 func (p *Plan) checkSpace() {
 	var need int64
+	p.Freed = 0
 	for _, a := range p.Actions {
-		if a.Op == OpCopy && a.Selected {
+		switch {
+		case a.Op == OpCopy && a.Selected:
 			need += a.Bytes
+		case a.Op == OpRemove && a.Selected:
+			p.Freed += a.Bytes
 		}
 	}
-	limit := int64(float64(p.Target.FreeBytes) * (1 - SpaceMargin))
+	limit := int64(float64(p.Target.FreeBytes+p.Freed) * (1 - SpaceMargin))
 	p.Blocked, p.Reason = false, ""
 	if need > limit {
 		p.Blocked, p.Reason = true, ReasonNotEnoughSpace

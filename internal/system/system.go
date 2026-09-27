@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os/user"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -266,6 +267,56 @@ func (s *System) AptRemove(ctx context.Context, pkgs []string) error {
 		return nil
 	}
 	return s.apt(ctx, append([]string{"remove", "--yes", "--"}, valid...)...)
+}
+
+// AptRemoveApps retire des applications à la demande de l'utilisateur
+// (« remove », jamais « purge » : leurs réglages système restent, et une
+// réinstallation les retrouve). Renvoie tout ce qui a réellement disparu,
+// dépendances emportées comprises, pour l'annulation.
+func (s *System) AptRemoveApps(ctx context.Context, pkgs []string) (removed []string, err error) {
+	var valid []string
+	for _, p := range pkgs {
+		if aptRe.MatchString(p) {
+			valid = append(valid, p)
+		}
+	}
+	if len(valid) == 0 {
+		return nil, nil
+	}
+	before := s.dpkgInstalled(ctx)
+	err = s.apt(ctx, append([]string{"remove", "--yes", "--"}, valid...)...)
+	after := s.dpkgInstalled(ctx)
+	for p := range before {
+		if !after[p] {
+			removed = append(removed, p)
+		}
+	}
+	sort.Strings(removed)
+	return removed, err
+}
+
+// FlatpakOrigin renvoie le dépôt d'où vient une application Flatpak.
+func (s *System) FlatpakOrigin(ctx context.Context, id string) string {
+	if !flatpakRe.MatchString(id) {
+		return ""
+	}
+	out, err := s.run(ctx, "flatpak", "info", "--show-origin", id)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// FlatpakReinstall remet une application retirée, depuis son dépôt d'origine.
+func (s *System) FlatpakReinstall(ctx context.Context, remote, id string) error {
+	if !flatpakRe.MatchString(id) || (remote != "" && !flatpakRe.MatchString(remote)) {
+		return fmt.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
+	}
+	if remote == "" {
+		remote = "flathub"
+	}
+	_, err := s.run(ctx, "flatpak", "install", "--system", "--noninteractive", "--assumeyes", remote, id)
+	return err
 }
 
 // FlatpakSetup installe Flatpak si besoin et ajoute Flathub pour tout le

@@ -36,7 +36,7 @@ migrated=true
 func themes(kind, name string) bool { return name == "Adwaita" }
 
 func TestGnomeToGnomeKeepsOnlyWhitelist(t *testing.T) {
-	out := Translate(ParseDump(gnomeDump), "gnome", "gnome", themes)
+	out := Translate(ParseDump(gnomeDump), "gnome", "gnome", themes, true)
 	if out["org/gnome/desktop/background"]["picture-uri"] == "" {
 		t.Error("fond d'écran perdu")
 	}
@@ -58,7 +58,7 @@ func TestGnomeToGnomeKeepsOnlyWhitelist(t *testing.T) {
 }
 
 func TestGnomeToCinnamon(t *testing.T) {
-	out := Translate(ParseDump(gnomeDump), "gnome", "cinnamon", themes)
+	out := Translate(ParseDump(gnomeDump), "gnome", "cinnamon", themes, true)
 	if out["org/cinnamon/desktop/background"]["picture-uri"] != "'file:///home/alice/Images/plage.jpg'" {
 		t.Errorf("fond d'écran non traduit : %v", out)
 	}
@@ -72,14 +72,14 @@ func TestGnomeToCinnamon(t *testing.T) {
 		t.Error("favoris perdus")
 	}
 	// Aller-retour : on retrouve les claviers GNOME.
-	back := Translate(ParseDump(out.String()), "cinnamon", "gnome", themes)
+	back := Translate(ParseDump(out.String()), "cinnamon", "gnome", themes, true)
 	if got := back["org/gnome/desktop/input-sources"]["sources"]; got != "[('xkb', 'be'), ('xkb', 'fr+bepo')]" {
 		t.Errorf("aller-retour des claviers : %s", got)
 	}
 }
 
 func TestUnknownDesktopTransfersNothing(t *testing.T) {
-	if out := Translate(ParseDump(gnomeDump), "gnome", "kde", nil); len(out) != 0 {
+	if out := Translate(ParseDump(gnomeDump), "gnome", "kde", nil, true); len(out) != 0 {
 		t.Errorf("rien ne doit être appliqué vers un bureau non pris en charge : %v", out)
 	}
 	if Fidelity("gnome", "kde") != "none" || Fidelity("gnome", "cinnamon") != "substitute" {
@@ -215,5 +215,19 @@ func TestClearPristineSkeleton(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".profile")); err != nil {
 		t.Fatal("un fichier modifié a été supprimé")
+	}
+}
+
+func TestTranslateKeepsTargetKeyboard(t *testing.T) {
+	in := ParseDump("[org/gnome/desktop/input-sources]\nsources=[('xkb', 'fr')]\n\n[org/gnome/desktop/background]\npicture-uri='file:///x.jpg'\n")
+	out := Translate(in, "gnome", "gnome", nil, false)
+	if _, ok := out["org/gnome/desktop/input-sources"]; ok {
+		t.Fatal("la disposition du clavier ne doit pas être reprise")
+	}
+	if out["org/gnome/desktop/background"]["picture-uri"] == "" {
+		t.Fatal("le fond d'écran doit être repris")
+	}
+	if _, ok := Translate(in, "gnome", "gnome", nil, true)["org/gnome/desktop/input-sources"]; !ok {
+		t.Fatal("clavier demandé mais non repris")
 	}
 }

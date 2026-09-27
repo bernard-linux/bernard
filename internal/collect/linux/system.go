@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/hardware"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/settings"
 )
@@ -52,6 +53,8 @@ func readSource(root string) inventory.Source {
 	}
 	src.Hostname, _ = os.Hostname()
 	src.Desktop = settings.DetectDesktop(root)
+	src.Keyboard = hardware.Keyboard(root)
+	src.GPUs = hardware.GPUs(root)
 	return src
 }
 

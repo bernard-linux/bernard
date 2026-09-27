@@ -39,6 +39,7 @@ type Applier struct {
 type Report struct {
 	UsersCreated []string          `json:"usersCreated,omitempty"`
 	Installed    []string          `json:"installed,omitempty"`
+	Removed      []string          `json:"removed,omitempty"`
 	Failed       map[string]string `json:"failed,omitempty"` // étiquette → raison
 }
 
@@ -116,6 +117,9 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 		}
 	}
 
+	// Retraits d'abord : ils libèrent de la place pour la suite.
+	a.removeApps(ctx, p, rep)
+
 	var aptPkgs, flatpaks []string
 	needFlatpak := false
 	for _, act := range p.Actions {
@@ -188,6 +192,60 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 	return rep, nil
 }
 
+// removeApps retire les applications choisies (absentes de l'ancien
+// ordinateur). Un échec n'arrête rien : il figure au rapport.
+func (a *Applier) removeApps(ctx context.Context, p *plan.Plan, rep *Report) {
+	var apt []string
+	var labels = map[string]string{}
+	for _, act := range p.Actions {
+		if !act.Selected || act.Op != plan.OpRemove {
+			continue
+		}
+		labels[act.Package] = act.Label
+		switch act.Via {
+		case "apt":
+			if !a.did(journal.SysAptRemoved, act.Package) {
+				apt = append(apt, act.Package)
+			}
+		case "flatpak":
+			if a.did(journal.SysFlatpakRemoved, act.Package) {
+				continue
+			}
+			origin := a.Sys.FlatpakOrigin(ctx, act.Package)
+			a.log("Retrait de %s…", act.Label)
+			if err := a.Sys.FlatpakUninstall(ctx, act.Package); err != nil {
+				rep.Failed[act.Label] = "retrait : " + err.Error()
+				continue
+			}
+			a.Journal.Append(journal.Record{T: journal.RecSys, Op: journal.SysFlatpakRemoved, Name: act.Package, Key: origin})
+			a.State.Sys = append(a.State.Sys, journal.Record{Op: journal.SysFlatpakRemoved, Name: act.Package, Key: origin})
+			rep.Removed = append(rep.Removed, act.Label)
+		}
+	}
+	if len(apt) == 0 {
+		return
+	}
+	a.log("Retrait de %d applications absentes de l'ancien ordinateur…", len(apt))
+	removed, err := a.Sys.AptRemoveApps(ctx, apt)
+	for _, pkg := range removed {
+		a.record(journal.SysAptRemoved, pkg)
+		if l, ok := labels[pkg]; ok {
+			rep.Removed = append(rep.Removed, l)
+		}
+	}
+	if err != nil {
+		gone := map[string]bool{}
+		for _, r := range removed {
+			gone[r] = true
+		}
+		for _, pkg := range apt {
+			if !gone[pkg] {
+				rep.Failed[labels[pkg]] = "retrait : " + err.Error()
+			}
+		}
+	}
+}
+
 func (a *Applier) flatpakInstalled(ctx context.Context) map[string]bool {
 	out, err := a.Sys.Exec(ctx, sysexec.Cmd{Name: "flatpak", Args: []string{"list", "--system", "--app", "--columns=application"}})
 	set := map[string]bool{}
@@ -203,19 +261,22 @@ func (a *Applier) flatpakInstalled(ctx context.Context) map[string]bool {
 // de chaque compte, avec le bon propriétaire. Pour un compte créé par
 // Bernard, les fichiers modèles encore intacts (.bashrc…) sont d'abord
 // retirés, pour que ceux de l'ancien ordinateur les remplacent.
-func CopyData(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inventory.Inventory, created map[string]bool) (map[string]*transfer.TreeReport, error) {
+//
+// Renvoie aussi les fichiers de profil de l'ancien ordinateur mis à la place
+// de ceux du nouveau (voir PreferSource).
+func CopyData(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inventory.Inventory, created map[string]bool) (out map[string]*transfer.TreeReport, replaced []string, err error) {
 	sets := map[string]inventory.DataSet{}
 	for _, d := range inv.DataSets {
 		sets[d.ID] = d
 	}
-	out := map[string]*transfer.TreeReport{}
+	out = map[string]*transfer.TreeReport{}
 	for _, act := range p.Actions {
 		if !act.Selected || act.Op != plan.OpCopy {
 			continue
 		}
 		uid, gid, home, err := system.Owner(act.Login)
 		if err != nil {
-			return out, fmt.Errorf("compte %s introuvable sur la cible : %w", act.Login, err)
+			return out, replaced, fmt.Errorf("compte %s introuvable sur la cible : %w", act.Login, err)
 		}
 		if created[act.Login] {
 			settings.ClearPristineSkeleton(home, "/etc/skel")
@@ -223,11 +284,31 @@ func CopyData(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *invent
 		rep, err := r.CopyDataSetAs(ctx, sets[act.From], home, &transfer.Owner{UID: uid, GID: gid})
 		out[act.From] = rep
 		if err != nil {
-			return out, err
+			return out, replaced, err
+		}
+		// Compte qui existait déjà sur un système tout juste installé : ses
+		// fichiers de profil sont vierges, ceux de l'ancien ordinateur
+		// prennent leur place (trousseau, profils des navigateurs).
+		if !created[act.Login] && Fresh() {
+			st, err := journal.Load(r.Journal.Path)
+			if err != nil {
+				return out, replaced, err
+			}
+			done, err := PreferSource(home, st, r.Journal)
+			for _, rel := range done {
+				replaced = append(replaced, act.Login+" : "+rel)
+			}
+			if err != nil {
+				return out, replaced, fmt.Errorf("mise en place des profils de %s : %w", act.Login, err)
+			}
 		}
 	}
-	return out, nil
+	return out, replaced, nil
 }
+
+// Fresh indique si la cible est fraîchement installée (remplacé dans les
+// tests).
+var Fresh = FreshInstall
 
 // SettingsReport résume la reprise des réglages.
 type SettingsReport struct {
@@ -264,7 +345,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				continue
 			}
 			if act.Reason != plan.ReasonDesktopMismatch && !a.did(journal.SysDconfApplied, act.Login) {
-				d := settings.Translate(settings.ParseDump(ex.Dconf[act.Login]), ex.Desktop, p.Target.Desktop, settings.ThemeExists(home))
+				d := settings.Translate(settings.ParseDump(ex.Dconf[act.Login]), ex.Desktop, p.Target.Desktop, settings.ThemeExists(home), keepKeyboard(p, act.Login))
 				if len(d) == 0 {
 					note("Réglages du bureau de "+act.Login, fmt.Errorf("%w : aucun réglage lu sur l'ancien ordinateur", settings.ErrSkipped))
 				} else {
@@ -339,12 +420,25 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 	return rep, nil
 }
 
+// keepKeyboard : la disposition du clavier de l'ancien ordinateur n'est
+// reprise que si les deux claviers sont identiques (aucune action
+// « keyboard » dans le plan) ou si l'utilisateur l'a demandé.
+func keepKeyboard(p *plan.Plan, login string) bool {
+	for _, a := range p.Actions {
+		if a.Op == plan.OpKeyboard && a.Login == login {
+			return a.Selected
+		}
+	}
+	return true
+}
+
 func (a *Applier) didLabel(op, name string) bool { return a.did(op, name) }
 
 // UndoReport résume l'annulation des modifications système.
 type UndoReport struct {
 	UsersDeleted []string `json:"usersDeleted,omitempty"`
 	Removed      []string `json:"removed,omitempty"`
+	Reinstalled  []string `json:"reinstalled,omitempty"`
 	Errors       []string `json:"errors,omitempty"`
 }
 
@@ -355,10 +449,18 @@ type UndoReport struct {
 func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *settings.Applier) *UndoReport {
 	rep := &UndoReport{}
 	fail := func(what string, err error) { rep.Errors = append(rep.Errors, what+" : "+err.Error()) }
-	var apt []string
+	var apt, aptBack []string
 	for i := len(st.Sys) - 1; i >= 0; i-- {
 		r := st.Sys[i]
 		switch r.Op {
+		case journal.SysAptRemoved:
+			aptBack = append(aptBack, r.Name)
+		case journal.SysFlatpakRemoved:
+			if err := sys.FlatpakReinstall(ctx, r.Key, r.Name); err != nil {
+				fail(r.Name, err)
+			} else {
+				rep.Reinstalled = append(rep.Reinstalled, r.Name)
+			}
 		case journal.SysWifiAdded:
 			if err := sa.RemoveWifi(ctx, r.Dst); err != nil {
 				fail("Wi-Fi "+r.Name, err)
@@ -393,6 +495,14 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 			}
 		case journal.SysAptAdded:
 			apt = append(apt, r.Name)
+		}
+	}
+	if len(aptBack) > 0 {
+		sys.AptUpdate(ctx)
+		back, failed := sys.AptInstall(ctx, aptBack)
+		rep.Reinstalled = append(rep.Reinstalled, back...)
+		for pkg, err := range failed {
+			fail("réinstallation de "+pkg, err)
 		}
 	}
 	if len(apt) > 0 {

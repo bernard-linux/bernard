@@ -209,3 +209,8 @@ dialog h2 { margin-top: 0; }
   .pulse, .radar .dots i { animation: none; }
   .tide i { transition: none; }
 }
+
+/* Options avancées de l'écran de choix : repliées par défaut. */
+details.advanced { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; }
+details.advanced > summary { cursor: pointer; font-weight: 600; color: var(--deep); }
+details.advanced h3 { font-size: 1rem; margin: 20px 0 6px; }

@@ -29,6 +29,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/remote"
 	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/source"
+	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
 // Étapes de l'assistant (écrans).
@@ -67,6 +68,7 @@ type UndoInfo struct {
 	Files int      `json:"files"`
 	Dirs  int      `json:"dirs"`
 	Apps  []string `json:"apps"`
+	Back  []string `json:"reinstalled"` // applications remises en place
 	Users []string `json:"users"`
 	Kept  []string `json:"kept"`
 	Errs  []string `json:"errors"`
@@ -565,10 +567,25 @@ func (c *Controller) UndoMigration() error {
 	}
 	info := &UndoInfo{Files: files.Removed, Dirs: files.DirsRemoved, Kept: files.Kept}
 	if sys != nil {
-		info.Apps, info.Users, info.Errs = sys.Removed, sys.UsersDeleted, sys.Errors
+		info.Apps, info.Back, info.Users, info.Errs = sys.Removed, sys.Reinstalled, sys.UsersDeleted, sys.Errors
 	}
 	c.update(func(s *State) { s.Undo, s.Busy = info, false })
 	return nil
+}
+
+// Reboot redémarre l'ordinateur, une fois la migration terminée : le
+// trousseau de clés et les réglages du bureau repris ne sont pris en compte
+// qu'à la prochaine ouverture de session.
+func (c *Controller) Reboot() error {
+	c.mu.Lock()
+	step := c.st.Step
+	c.mu.Unlock()
+	if step != StepReport {
+		return errors.New("redémarrage possible seulement à la fin de la migration")
+	}
+	c.end()
+	_, err := sysexec.Run(context.Background(), sysexec.Cmd{Name: "systemctl", Args: []string{"reboot"}})
+	return err
 }
 
 // RequestQuit demande la fermeture de Bernard.

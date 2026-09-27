@@ -466,6 +466,8 @@ const screens = {
     const sets = p.actions.filter(a => a.op === "settings");
     const skipped = apps.filter(a => a.op === "skip");
     const visibleApps = apps.filter(a => a.op !== "skip");
+    const removals = p.actions.filter(a => a.op === "remove");
+    const keyboards = p.actions.filter(a => a.op === "keyboard");
 
     main.replaceChildren(el(`
       <h1>Choisissez ce qui vient avec vous</h1>
@@ -488,11 +490,14 @@ const screens = {
       <ul class="list" id="apps">${visibleApps.map(a => appRow(a, s)).join("") || `<li><span></span><span class="meta">Aucune application à installer : tout est déjà présent.</span><span></span></li>`}</ul>
       ${skipped.length ? `<button class="link toggle-more" id="more">Afficher les ${skipped.length} éléments déjà présents sur cet ordinateur</button>
         <ul class="list" id="skipped" hidden>${skipped.map(a => `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span>
-        <span class="meta"> ${a.reason === "snapInfrastructure" ? "composant technique, inutile ici" : "déjà installé"}</span></span><span></span></li>`).join("")}</ul>` : ""}
+        <span class="meta"> ${skipWhy(a)}</span></span><span></span></li>`).join("")}</ul>` : ""}
+      ${removals.length ? `<p class="meta" id="rm-summary"></p>` : ""}
 
       ${net.length ? `<h2>Réseau et imprimantes</h2><ul class="list">${net.map(a => a.op === "importWifi"
         ? row(a, `Wi-Fi « ${esc(a.label)} »`, "Le mot de passe du réseau est repris.")
         : row(a, `Imprimante ${esc(a.label)}`, "Réinstallée automatiquement si c'est une imprimante réseau ; une imprimante USB sera à rebrancher.")).join("")}</ul>` : ""}
+
+      ${advancedSection(s, removals, keyboards)}
 
       ${(s.warnings || []).map(w => `<p class="banner warn">${esc(w)}</p>`).join("")}
       <p class="form-error banner error" hidden></p>
@@ -515,6 +520,13 @@ const screens = {
       main.querySelectorAll("#apps input[data-id]").forEach(cb => {
         cb.checked = all.checked; ui.selected[cb.dataset.id] = all.checked;
         cb.closest("li").classList.toggle("off", !all.checked);
+      });
+      updateSummary(s);
+    });
+    main.querySelector("#rm-all")?.addEventListener("change", e => {
+      main.querySelectorAll("#removals input[data-id]").forEach(cb => {
+        cb.checked = e.target.checked; ui.selected[cb.dataset.id] = cb.checked;
+        cb.closest("li").classList.toggle("off", !cb.checked);
       });
       updateSummary(s);
     });
@@ -569,7 +581,7 @@ const screens = {
     const ok = !errors.length && !failed.length;
     const title = s.undo ? "Migration annulée" : ok ? "Tout est arrivé" : "Migration terminée, quelques éléments à revoir";
     const lead = s.undo ? "Cet ordinateur est revenu à son état d'avant la migration, à l'exception des fichiers modifiés depuis. Voici ce qui avait été fait."
-      : ok ? "Chaque fichier a été vérifié. Vous pouvez fermer votre session et vous reconnecter avec votre compte."
+      : ok ? "Chaque fichier a été vérifié. Redémarrez l'ordinateur avant d'utiliser vos applications : mots de passe des navigateurs et réglages du bureau ne sont pris en compte qu'à la prochaine ouverture de session."
       : "Tout le reste a été copié et vérifié. Voici ce qui demande votre attention.";
     main.replaceChildren(el(`
       <h1>${title}</h1>
@@ -578,6 +590,8 @@ const screens = {
         <li>${plural(files, "fichier vérifié", "fichiers vérifiés")} (${bytes(vol)} copiés pendant cette migration)</li>
         ${(r.system?.usersCreated || []).map(u => `<li>Compte ${esc(u)} créé</li>`).join("")}
         ${(r.system?.installed || []).length ? `<li>${r.system.installed.length} applications installées</li>` : ""}
+        ${(r.system?.removed || []).length ? `<li>Retirées, comme sur l'ancien ordinateur : ${r.system.removed.map(esc).join(", ")}</li>` : ""}
+        ${(r.replaced || []).length ? `<li>Trousseau de clés et profils des navigateurs de l'ancien ordinateur mis en place (ceux d'ici sont gardés dans ~/.local/share/bernard/avant-migration)</li>` : ""}
         ${setApplied.map(n => `<li>${esc(n)}</li>`).join("")}
         ${failed.map(([n, why]) => `<li class="bad">${esc(n)} : échec (${esc(why)})</li>`).join("")}
         ${errors.map(e => `<li class="bad">${esc(e.path)} : ${esc(e.error)}</li>`).join("")}
@@ -591,8 +605,14 @@ const screens = {
       <div id="undo"></div>
       <div class="bar"><span class="summary">Conservez l'ancien ordinateur tel quel tant que vous n'avez pas tout vérifié ici.</span>
         <button data-act="undo" class="danger">Annuler la migration</button>
-        <button data-act="quit" class="primary">Fermer Bernard</button></div>`));
+        <button data-act="quit" class="quiet">Fermer Bernard</button>
+        ${s.undo ? "" : `<button data-act="reboot" class="primary">Redémarrer maintenant</button>`}</div>`));
     main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
+    main.querySelector("[data-act=reboot]")?.addEventListener("click", async () => {
+      if (await confirmBox("Redémarrer maintenant ?", "Fermez d'abord vos autres applications. Après le redémarrage, connectez-vous avec votre compte : tout sera en place.", "Redémarrer", false)) {
+        try { await api("reboot"); } catch (e) { alert(e.message); }
+      }
+    });
     main.querySelector("[data-act=undo]").addEventListener("click", async () => {
       if (await confirmBox("Annuler la migration ?",
         "Bernard retirera les fichiers qu'il a copiés (sauf ceux modifiés depuis), les applications et les comptes qu'il a ajoutés. Les fichiers qui étaient déjà sur cet ordinateur ne sont pas touchés.",
@@ -643,7 +663,47 @@ function settingsMeta(a, s) {
       : "Bureau non reconnu : les réglages du bureau ne sont pas repris. Les tâches planifiées suivent.";
   if (a.fidelity === "substitute")
     return `Traduits de ${src} vers ${dst} : fond d'écran, clavier, souris, favoris, taille du texte, veille. Tâches planifiées incluses.`;
+  if (s.plan.actions.some(x => x.op === "keyboard" && x.login === a.login))
+    return "Fond d'écran, souris, dock, polices, veille, terminal. Tâches planifiées incluses. La disposition du clavier d'ici est conservée.";
   return "Fond d'écran, clavier, souris, dock, polices, veille, terminal. Tâches planifiées incluses.";
+}
+function skipWhy(a) {
+  if (a.reason === "snapInfrastructure") return "composant technique, inutile ici";
+  if (a.reason === "hardware") return "lié au matériel de l'ancien ordinateur : chaque ordinateur garde ses propres pilotes";
+  return "déjà installé";
+}
+const GPU = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel", autre: "autre" };
+function gpuList(g) { return (g || []).map(x => GPU[x] || x).join(" + ") || "inconnue"; }
+function removalMeta(a) {
+  const why = a.reason === "removedOnSource" ? `Vous l'aviez retirée de l'ancien ordinateur le ${dateFR(a.date)}.`
+    : a.reason === "absentOnSource" ? "Absente de l'ancien ordinateur."
+    : "Absente de l'ancien ordinateur, dont le système est d'une autre version : elle est peut-être simplement nouvelle ici.";
+  const size = a.bytes ? ` Libère ${bytes(a.bytes)}.` : "";
+  const also = a.also?.length ? ` Retire aussi : ${a.also.map(esc).join(", ")}.` : "";
+  return why + size + also;
+}
+function advancedSection(s, removals, keyboards) {
+  const src = s.source || {}, dst = s.plan.target || {};
+  const parts = [];
+  if (removals.length) parts.push(`
+    <h3>Applications absentes de l'ancien ordinateur</h3>
+    <p class="meta">Installées d'office avec ${esc(distro(dst) || "ce système")}, mais que vous n'avez pas sur l'ancien ordinateur.
+    Cochées : elles seront retirées d'ici. Vos fichiers ne sont pas touchés, et « Annuler la migration » les réinstalle.</p>
+    <label class="meta"><input type="checkbox" id="rm-all"> Tout cocher</label>
+    <ul class="list" id="removals">${removals.map(a => row(a, esc(a.label), removalMeta(a),
+      `<span class="tag none">${a.via === "flatpak" ? "Flatpak" : "Paquet"}</span>`)).join("")}</ul>`);
+  if (keyboards.length) parts.push(`
+    <h3>Clavier</h3>
+    <p class="meta">Le clavier de cet ordinateur (${esc(dst.keyboard || "inconnu")}) n'est pas celui de l'ancien (${esc(src.keyboard || "inconnu")}).
+    La disposition choisie à l'installation est conservée. Cochez seulement si vous utiliserez ici le même clavier qu'avant.</p>
+    <ul class="list">${keyboards.map(a => row(a, `Reprendre la disposition de l'ancien ordinateur pour ${esc(a.login)}`,
+      `Disposition ${esc(a.date || "inconnue")} au lieu de ${esc(dst.keyboard || "celle d'ici")}.`)).join("")}</ul>`);
+  parts.push(`
+    <h3>Matériel</h3>
+    <p class="meta">Carte graphique ici : ${esc(gpuList(dst.gpus))} ; sur l'ancien : ${esc(gpuList(src.gpus))}.
+    Pilotes, micrologiciels et noyau ne sont jamais recopiés ni retirés : chaque ordinateur garde ceux choisis pour lui.
+    Les caches graphiques des navigateurs ne sont pas copiés, ils se refont seuls.</p>`);
+  return `<details class="advanced" id="advanced"><summary>Options avancées</summary>${parts.join("")}</details>`;
 }
 function appRow(a, s) {
   const t = s.apps?.[a.from];
@@ -673,7 +733,7 @@ function accountRow(a, s) {
 }
 function updateSummary(s) {
   const p = s.plan;
-  let need = 0, apps = 0;
+  let need = 0, apps = 0, freed = 0, rm = 0;
   const loginOn = {};
   for (const a of p.actions) {
     if ((a.op === "createUser" || a.op === "useUser")) loginOn[a.login] = ui.selected[a.id];
@@ -682,8 +742,16 @@ function updateSummary(s) {
     if (!ui.selected[a.id]) continue;
     if (a.op === "copy" && loginOn[a.login] !== false) need += a.bytes;
     if (a.op === "install") apps++;
+    if (a.op === "remove") { rm++; freed += a.bytes || 0; }
   }
-  const free = p.target.freeBytes;
+  const free = p.target.freeBytes + freed;
+  const rs = main.querySelector("#rm-summary");
+  if (rs) rs.innerHTML = rm
+    ? fr(`${plural(rm, "application que vous n'avez pas sur l'ancien ordinateur sera retirée", "applications que vous n'avez pas sur l'ancien ordinateur seront retirées")} d'ici${freed ? ` (${bytes(freed)} libérés)` : ""}. `) + `<button class="link" id="rm-open">Voir et choisir</button>`
+    : `Aucune application ne sera retirée d'ici. <button class="link" id="rm-open">Voir les propositions</button>`;
+  main.querySelector("#rm-open")?.addEventListener("click", () => {
+    const d = main.querySelector("#advanced"); d.open = true; d.scrollIntoView({ behavior: "smooth" });
+  });
   const over = need > free * 0.95;
   main.querySelector("#sum-text").textContent = fr(
     `À copier : ${bytes(need)} sur ${bytes(free)} libres. ` +
@@ -811,7 +879,7 @@ function renderUndo(s) {
   if (!s.undo) { box.replaceChildren(); return; }
   const u = s.undo;
   box.replaceChildren(el(`<div class="banner good"><strong>Migration annulée.</strong>
-    ${plural(u.files, "fichier retiré", "fichiers retirés")}${u.apps?.length ? `, ${u.apps.length} applications retirées` : ""}${u.users?.length ? `, comptes supprimés : ${u.users.map(esc).join(", ")}` : ""}.
+    ${plural(u.files, "fichier retiré", "fichiers retirés")}${u.apps?.length ? `, ${u.apps.length} applications retirées` : ""}${u.reinstalled?.length ? `, ${u.reinstalled.length} applications réinstallées` : ""}${u.users?.length ? `, comptes supprimés : ${u.users.map(esc).join(", ")}` : ""}.
     ${u.kept?.length ? `<br>${plural(u.kept.length, "fichier modifié", "fichiers modifiés")} depuis la copie conservé(s).` : ""}
     ${u.errors?.length ? `<br>Non annulé : ${u.errors.map(esc).join(" ; ")}` : ""}</div>`));
   main.querySelector("[data-act=undo]").disabled = true;

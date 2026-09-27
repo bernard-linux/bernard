@@ -1,5 +1,13 @@
 # Historique des versions
 
+## 0.3.1 — à venir
+
+- Publication : les versions 0.x ne sont plus marquées « préversion », pour
+  que le lien fixe `releases/latest/download/bernard_amd64.deb` désigne
+  bien la dernière version.
+- Intégration continue : actions GitHub passées à leurs versions Node.js 24
+  (checkout v5, setup-go v6, upload-artifact v6, download-artifact v7).
+
 ## 0.3.0 — 27 septembre 2026
 
 Corrections issues du premier essai réel Zorin OS → Zorin OS (deux PC

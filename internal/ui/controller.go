@@ -30,6 +30,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/source"
 	"github.com/bernard-linux/bernard/internal/sysexec"
+	"github.com/bernard-linux/bernard/internal/system"
 )
 
 // Étapes de l'assistant (écrans).
@@ -96,6 +97,10 @@ type State struct {
 	Result    *migrate.Result       `json:"result,omitempty"`
 	Undo      *UndoInfo             `json:"undo,omitempty"`
 	Busy      bool                  `json:"busy"`
+	// Comptes de cet ordinateur qui ne viennent pas de l'ancien (compte
+	// provisoire créé à l'installation), proposés à la suppression en fin
+	// de migration.
+	Extra []system.Account `json:"extraAccounts,omitempty"`
 
 	// Rôle de cet ordinateur : target (nouveau) ou source (ancien).
 	Role string `json:"role,omitempty"`
@@ -480,8 +485,66 @@ func (c *Controller) run(ctx context.Context, src source.Source) error {
 	if err != nil {
 		return err
 	}
-	c.update(func(s *State) { s.Step, s.Result, s.Busy = StepReport, res, false })
+	extra := extraAccounts(sess)
+	c.update(func(s *State) { s.Step, s.Result, s.Busy, s.Extra = StepReport, res, false, extra })
 	return nil
+}
+
+// extraAccounts liste les comptes de la cible qui ne font pas partie de la
+// migration.
+func extraAccounts(sess *migrate.Session) []system.Account {
+	migrated := map[string]bool{}
+	for _, u := range sess.Inv.Users {
+		migrated[u.Login] = true
+	}
+	accs, err := system.HumanAccounts()
+	if err != nil {
+		return nil
+	}
+	current := os.Getenv("PKEXEC_UID")
+	var out []system.Account
+	for _, a := range accs {
+		if migrated[a.Login] {
+			continue
+		}
+		a.Files, a.Bytes = system.MeasureHome(a.Home)
+		a.Current = current != "" && current == strconv.Itoa(a.UID)
+		a.Scheduled = system.RemovalScheduled(a.Login)
+		out = append(out, a)
+	}
+	return out
+}
+
+// ScheduleRemoval programme (ou annule) la suppression d'un compte non
+// migré au prochain démarrage.
+func (c *Controller) ScheduleRemoval(login string, on bool) error {
+	c.mu.Lock()
+	sess, step := c.sess, c.st.Step
+	c.mu.Unlock()
+	if step != StepReport || sess == nil {
+		return errors.New("possible seulement à la fin de la migration")
+	}
+	allowed := false
+	for _, a := range extraAccounts(sess) {
+		allowed = allowed || a.Login == login
+	}
+	if !allowed {
+		return errors.New("ce compte fait partie de la migration : il ne peut pas être supprimé ici")
+	}
+	sys := system.New()
+	var err error
+	if on {
+		self, _ := os.Executable()
+		err = sys.ScheduleRemoval(context.Background(), login, self)
+		if errors.Is(err, system.ErrLastAdmin) {
+			err = errors.New("aucun compte migré n'est administrateur : gardez ce compte, sinon plus personne ne pourrait gérer l'ordinateur")
+		}
+	} else {
+		err = sys.CancelRemoval(context.Background(), login)
+	}
+	extra := extraAccounts(sess)
+	c.update(func(s *State) { s.Extra = extra })
+	return err
 }
 
 // Submit transmet les choix de l'utilisateur. ids : identifiant d'action du
@@ -560,6 +623,11 @@ func (c *Controller) UndoMigration() error {
 	}
 	c.end()
 	c.update(func(s *State) { s.Busy = true })
+	for _, a := range extraAccounts(sess) {
+		if a.Scheduled {
+			system.New().CancelRemoval(context.Background(), a.Login)
+		}
+	}
 	files, sys, err := migrate.Undo(context.Background(), sess.JournalPath)
 	if err != nil {
 		c.update(func(s *State) { s.Busy = false })

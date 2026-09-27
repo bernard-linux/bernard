@@ -89,6 +89,16 @@ func (s *Server) routes() http.Handler {
 	api.HandleFunc("/api/pair", s.post(s.handlePair))
 	api.HandleFunc("/api/pack", s.post(s.handlePack))
 	api.HandleFunc("/api/disks", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.RefreshDisks(); return nil }))
+	api.HandleFunc("/api/remove-account", s.post(func(w http.ResponseWriter, r *http.Request) error {
+		var req struct {
+			Login string `json:"login"`
+			On    bool   `json:"on"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return err
+		}
+		return s.Ctrl.ScheduleRemoval(req.Login, req.On)
+	}))
 	api.HandleFunc("/api/reboot", s.post(func(w http.ResponseWriter, r *http.Request) error { return s.Ctrl.Reboot() }))
 	api.HandleFunc("/api/quit", s.post(func(w http.ResponseWriter, r *http.Request) error { s.Ctrl.RequestQuit(); return nil }))
 	mux.Handle("/api/", s.guard(api))

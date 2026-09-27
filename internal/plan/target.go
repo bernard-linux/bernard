@@ -74,6 +74,9 @@ func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 
 	t.Keyboard = hardware.Keyboard("/")
 	t.GPUs = hardware.GPUs("/")
+	if al := settings.DetectAutoLogin("/"); al != nil {
+		t.AutoLoginUser = al.User
+	}
 	detectRemovable(ctx, run, &t)
 	return t, warnings
 }

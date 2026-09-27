@@ -393,6 +393,20 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 			}
 			note(label, err)
 
+		case plan.OpAutoLoginOff:
+			label := "Ouverture automatique de la session « " + act.Label + " » désactivée"
+			if a.didAny(journal.SysAutoLoginOff) {
+				continue
+			}
+			pairs, err := sa.DisableAutoLogin("/")
+			for _, pr := range pairs {
+				if rerr := a.Journal.Append(journal.Record{T: journal.RecSys, Op: journal.SysAutoLoginOff, Name: pr[0], Dst: pr[1]}); rerr != nil {
+					return rep, rerr
+				}
+				a.State.Sys = append(a.State.Sys, journal.Record{Op: journal.SysAutoLoginOff, Name: pr[0], Dst: pr[1]})
+			}
+			note(label, err)
+
 		case plan.OpAddPrinter:
 			label := "Imprimante " + act.Label
 			var pr *settings.Printer
@@ -432,6 +446,15 @@ func keepKeyboard(p *plan.Plan, login string) bool {
 	return true
 }
 
+func (a *Applier) didAny(op string) bool {
+	for _, r := range a.State.Sys {
+		if r.Op == op {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Applier) didLabel(op, name string) bool { return a.did(op, name) }
 
 // UndoReport résume l'annulation des modifications système.
@@ -453,6 +476,10 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 	for i := len(st.Sys) - 1; i >= 0; i-- {
 		r := st.Sys[i]
 		switch r.Op {
+		case journal.SysAutoLoginOff:
+			if err := settings.RestoreFile(r.Name, r.Dst); err != nil {
+				fail("ouverture automatique de session", err)
+			}
 		case journal.SysAptRemoved:
 			aptBack = append(aptBack, r.Name)
 		case journal.SysFlatpakRemoved:

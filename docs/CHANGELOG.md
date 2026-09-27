@@ -30,6 +30,22 @@ fonctionnent.
 - Écran de fin : bouton « Redémarrer maintenant » ; le trousseau et les
   réglages du bureau ne sont pris en compte qu'à la session suivante.
 
+**Compte provisoire du nouvel ordinateur**
+
+- Si le nouvel ordinateur ouvre seul la session d'un compte qui ne vient pas
+  de l'ancien (compte « tmp » créé pour l'installation), cette ouverture
+  automatique est coupée pendant la migration : au redémarrage, l'écran de
+  connexion laisse choisir le compte migré. GDM (Ubuntu, Zorin, Debian) et
+  LightDM (Mint). La ligne figure dans « Réglages » sur l'écran de choix ;
+  « Annuler la migration » remet la configuration d'origine.
+- Écran de fin : section « Compte provisoire » avec le nombre de fichiers
+  personnels du compte. Bouton « Supprimer au prochain démarrage » (après
+  confirmation) : le compte et son dossier sont supprimés au démarrage
+  suivant, avant l'écran de connexion. Changement d'avis possible jusque-là
+  (« Garder ce compte »). Refusé si aucun autre compte n'est administrateur,
+  ou si une session du compte est ouverte. Nouvelle commande
+  `sudo bernard remove-account IDENTIFIANT`.
+
 **Chaque ordinateur garde ce qui tient à son matériel**
 
 - La disposition du clavier n'est plus reprise quand les deux ordinateurs

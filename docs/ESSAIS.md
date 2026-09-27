@@ -64,6 +64,10 @@ Tout se fait dans l'interface graphique, sur les deux machines.
    Paramètres → Mots de passe ; Firefox : about:logins).
    Applications retirées : celles cochées dans « Options avancées » ont
    disparu du menu, les autres sont restées.
+   Compte provisoire : si la cible ouvrait seule la session « tmp », l'écran
+   de connexion apparaît au redémarrage. Tester « Supprimer au prochain
+   démarrage » puis « Garder ce compte », puis de nouveau « Supprimer » et
+   redémarrer : le compte a disparu de l'écran de connexion.
 8. Relancer Bernard et tester « Annuler la migration » sur une migration,
    si la machine peut être remise à zéro.
 

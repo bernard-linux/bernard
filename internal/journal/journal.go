@@ -46,6 +46,9 @@ const (
 	SysAptRemoved = "aptRemoved"
 	// SysFlatpakRemoved : idem pour une application Flatpak.
 	SysFlatpakRemoved = "flatpakRemoved"
+	// SysAutoLoginOff : ouverture de session automatique coupée. Name =
+	// fichier de configuration, Dst = sauvegarde.
+	SysAutoLoginOff = "autoLoginOff"
 )
 
 // Record est une ligne du journal.

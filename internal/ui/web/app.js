@@ -464,6 +464,7 @@ const screens = {
       .sort((a, b) => lastUsed(s, b) - lastUsed(s, a));
     const net = p.actions.filter(a => a.op === "importWifi" || a.op === "addPrinter");
     const sets = p.actions.filter(a => a.op === "settings");
+    const autologin = p.actions.filter(a => a.op === "autoLoginOff");
     const skipped = apps.filter(a => a.op === "skip");
     const visibleApps = apps.filter(a => a.op !== "skip");
     const removals = p.actions.filter(a => a.op === "remove");
@@ -483,7 +484,9 @@ const screens = {
 
       <h2>Réglages</h2>
       <ul class="list">${sets.map(a => row(a, `Réglages de ${esc(a.login)}`, settingsMeta(a, s),
-        a.fidelity === "substitute" ? `<span class="tag substitute">Traduits</span>` : a.reason ? `<span class="tag none">Partiel</span>` : `<span class="tag full">Identiques</span>`)).join("")}</ul>
+        a.fidelity === "substitute" ? `<span class="tag substitute">Traduits</span>` : a.reason ? `<span class="tag none">Partiel</span>` : `<span class="tag full">Identiques</span>`)).join("")}
+      ${autologin.map(a => row(a, `Ne plus ouvrir seule la session « ${esc(a.login)} »`,
+        `Au démarrage, cet ordinateur ouvre directement le compte ${esc(a.login)}. Après la migration, l'écran de connexion vous laissera choisir votre compte.`)).join("")}</ul>
 
       <h2>Applications</h2>
       ${visibleApps.some(a => a.op === "install") ? `<label class="meta"><input type="checkbox" id="all-apps"> Tout sélectionner</label>` : ""}
@@ -567,6 +570,7 @@ const screens = {
   },
 
   report(s) {
+    ui.extraKey = JSON.stringify(s.extraAccounts || []);
     setRail(6);
     const r = s.result || {};
     const data = Object.values(r.data || {});
@@ -589,7 +593,7 @@ const screens = {
       <ul class="results">
         <li>${plural(files, "fichier vérifié", "fichiers vérifiés")} (${bytes(vol)} copiés pendant cette migration)</li>
         ${(r.system?.usersCreated || []).map(u => `<li>Compte ${esc(u)} créé</li>`).join("")}
-        ${(r.system?.installed || []).length ? `<li>${r.system.installed.length} applications installées</li>` : ""}
+        ${(r.system?.installed || []).length ? `<li>${plural(r.system.installed.length, "application installée", "applications installées")}</li>` : ""}
         ${(r.system?.removed || []).length ? `<li>Retirées, comme sur l'ancien ordinateur : ${r.system.removed.map(esc).join(", ")}</li>` : ""}
         ${(r.replaced || []).length ? `<li>Trousseau de clés et profils des navigateurs de l'ancien ordinateur mis en place (ceux d'ici sont gardés dans ~/.local/share/bernard/avant-migration)</li>` : ""}
         ${setApplied.map(n => `<li>${esc(n)}</li>`).join("")}
@@ -602,12 +606,23 @@ const screens = {
         <ul class="list">${renamed.map(f => `<li><span></span><span class="meta">${esc(f.dst)}</span><span></span></li>`).join("")}</ul>` : ""}
       ${skippedFiles.length ? `<details><summary>${skippedFiles.length} fichiers spéciaux ignorés (tubes, sockets)</summary><pre class="log">${esc(skippedFiles.join("\n"))}</pre></details>` : ""}
       <p class="meta">Rapport détaillé : <span class="cmd">${esc(r.reportPath || "")}</span></p>
+      ${s.undo ? "" : extraAccountsSection(s)}
       <div id="undo"></div>
-      <div class="bar"><span class="summary">Conservez l'ancien ordinateur tel quel tant que vous n'avez pas tout vérifié ici.</span>
+      <div class="bar"><span class="summary">Gardez l'ancien ordinateur intact pour l'instant.</span>
         <button data-act="undo" class="danger">Annuler la migration</button>
-        <button data-act="quit" class="quiet">Fermer Bernard</button>
+        <button data-act="quit" class="quiet">Fermer</button>
         ${s.undo ? "" : `<button data-act="reboot" class="primary">Redémarrer maintenant</button>`}</div>`));
     main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
+    main.querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", async () => {
+      const login = b.dataset.rm, on = b.dataset.on === "1";
+      const acc = (s.extraAccounts || []).find(x => x.login === login) || {};
+      if (on && !(await confirmBox(`Supprimer le compte « ${login} » ?`,
+        `Au prochain démarrage, avant l'écran de connexion, le compte ${login} et son dossier personnel seront supprimés` +
+        (acc.files ? ` (${plural(acc.files, "fichier personnel", "fichiers personnels")}, ${bytes(acc.bytes)})` : " (aucun fichier personnel)") +
+        `. Cette suppression est définitive. Vous pouvez encore changer d'avis ici tant que l'ordinateur n'a pas redémarré.`,
+        "Supprimer au prochain démarrage", true))) return;
+      try { await api("remove-account", { login, on }); } catch (e) { alert(e.message); }
+    }));
     main.querySelector("[data-act=reboot]")?.addEventListener("click", async () => {
       if (await confirmBox("Redémarrer maintenant ?", "Fermez d'abord vos autres applications. Après le redémarrage, connectez-vous avec votre compte : tout sera en place.", "Redémarrer", false)) {
         try { await api("reboot"); } catch (e) { alert(e.message); }
@@ -873,6 +888,22 @@ function updateSend(s) {
   main.querySelector("#log").textContent = (s.log || []).join("\n");
 }
 
+function extraAccountsSection(s) {
+  const accs = s.extraAccounts || [];
+  if (!accs.length) return "";
+  const migrated = (s.plan?.actions || []).filter(a => (a.op === "createUser" || a.op === "useUser") && a.selected).map(a => a.login);
+  const who = migrated.length ? `votre compte « ${esc(migrated[0])} »` : "votre compte";
+  return `<h2>Compte provisoire</h2>
+    <p>Ce compte ne vient pas de l'ancien ordinateur : sans doute celui créé pour installer le système.
+    Au redémarrage, choisissez ${who} sur l'écran de connexion. Si vous êtes sûr de votre coup, le compte provisoire peut être supprimé au redémarrage ; sinon, gardez-le et
+    supprimez-le plus tard depuis Paramètres → Utilisateurs.</p>
+    <ul class="list">${accs.map(a => `<li><span></span><span><span class="name">${esc(a.login)}${a.current ? " (session ouverte en ce moment)" : ""}</span><br>
+      <span class="meta">${a.files ? `${plural(a.files, "fichier personnel", "fichiers personnels")}, ${bytes(a.bytes)}` : "Aucun fichier personnel"}${a.admin ? " · administrateur" : ""}.
+      ${a.scheduled ? "<strong>Sera supprimé au prochain démarrage.</strong>" : ""}</span></span>
+      ${a.scheduled ? `<button class="quiet" data-rm="${esc(a.login)}" data-on="0">Garder ce compte</button>`
+        : `<button class="danger" data-rm="${esc(a.login)}" data-on="1">Supprimer au prochain démarrage</button>`}</li>`).join("")}</ul>`;
+}
+
 function renderUndo(s) {
   const box = main.querySelector("#undo");
   if (!box) return;
@@ -899,7 +930,7 @@ function render(s) {
   } else if (s.step === "network") {
     const codeNow = [...main.querySelectorAll(".code b")].map(b => b.textContent).join("");
     if (codeNow !== s.code) screens.network(s);
-  } else if (s.step === "report" && s.undo && !main.querySelector("#undo .banner")) {
+  } else if (s.step === "report" && ((s.undo && !main.querySelector("#undo .banner")) || JSON.stringify(s.extraAccounts || []) !== ui.extraKey)) {
     screens.report(s);
   } else if (s.step === "src-wait") {
     updateWait(s);

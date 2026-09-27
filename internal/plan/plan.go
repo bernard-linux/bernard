@@ -31,6 +31,7 @@ const (
 	OpAddPrinter   = "addPrinter"   // réinstaller une imprimante réseau
 	OpRemove       = "remove"       // retirer une application absente de l'ancien ordinateur
 	OpKeyboard     = "keyboard"     // reprendre la disposition du clavier de l'ancien ordinateur
+	OpAutoLoginOff = "autoLoginOff" // ne plus ouvrir seule la session d'un compte non migré
 	OpSkip         = "skip"         // rien à faire (déjà présent, technique…)
 	OpReview       = "review"       // action manuelle proposée à l'utilisateur
 )
@@ -98,6 +99,8 @@ type Target struct {
 	SnapInstalled    map[string]bool   `json:"-"`
 	Keyboard         string            `json:"keyboard,omitempty"`
 	GPUs             []string          `json:"gpus,omitempty"`
+	// AutoLoginUser : compte dont la session s'ouvre seule au démarrage.
+	AutoLoginUser string `json:"autoLoginUser,omitempty"`
 	// Pour proposer le retrait des applications absentes de la source.
 	AptManual map[string]bool `json:"-"`
 	// AptApps : paquet → nom de l'application qu'il affiche dans le menu.
@@ -211,6 +214,19 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 		if fid != FidelityNone && inv.Source.Keyboard != t.Keyboard {
 			add(Action{Op: OpKeyboard, From: u.ID, Login: u.Login, Label: u.Login,
 				Date: inv.Source.Keyboard, Fidelity: fid, Selected: false})
+		}
+	}
+
+	// 4 bis. Session ouverte automatiquement sur un compte qui n'est pas
+	// migré (compte provisoire créé à l'installation) : après la migration,
+	// l'écran de connexion doit laisser choisir le compte migré.
+	if u := t.AutoLoginUser; u != "" {
+		migrated := false
+		for _, iu := range inv.Users {
+			migrated = migrated || iu.Login == u
+		}
+		if !migrated {
+			add(Action{Op: OpAutoLoginOff, Login: u, Label: u, Fidelity: FidelityFull, Selected: true})
 		}
 	}
 

@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bernard-linux/bernard/internal/apply"
 	"github.com/bernard-linux/bernard/internal/discovery"
@@ -47,8 +48,9 @@ import (
 const usage = `bernard — moteur de Bernard, l'assistant de migration vers Linux
 
 Usage :
-  bernard gui
+  bernard gui [--browser]
       Ouvre l'assistant graphique (demande le mot de passe administrateur).
+      --browser : dans le navigateur au lieu de la fenêtre dédiée.
   sudo bernard receive --system [--yes] [--port 51516]
       Migration réelle : attend l'ancien ordinateur, affiche le code,
       montre le plan, crée les comptes, installe les applications et copie
@@ -82,7 +84,7 @@ func main() {
 	var code int
 	switch os.Args[1] {
 	case "gui":
-		code = runGUI()
+		code = runGUI(os.Args[2:])
 	case "ui":
 		code = runUI(ctx, os.Args[2:])
 	case "receive":
@@ -520,6 +522,8 @@ func runUI(ctx context.Context, args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// La ligne CLIENT indique au lanceur que la page a bien chargé.
+	srv.OnClient = func() { fmt.Println("CLIENT"); os.Stdout.Sync() }
 	go srv.Serve()
 	fmt.Println("URL " + srv.URL())
 	os.Stdout.Sync()
@@ -559,7 +563,8 @@ func runRemoveAccount(ctx context.Context, args []string) int {
 // runGUI est le point d'entrée du menu des applications. Il tourne en
 // utilisateur normal : il lance le moteur via pkexec, puis ouvre la fenêtre
 // avec les droits de l'utilisateur (jamais en administrateur).
-func runGUI() int {
+func runGUI(args []string) int {
+	browser := (len(args) > 0 && args[0] == "--browser") || browserRemembered()
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -579,7 +584,8 @@ func runGUI() int {
 		fmt.Fprintln(os.Stderr, "Impossible de lancer le moteur :", err)
 		return 1
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
+	rd := bufio.NewReader(stdout)
+	line, err := rd.ReadString('\n')
 	if err != nil || !strings.HasPrefix(line, "URL ") {
 		fmt.Fprintln(os.Stderr, "Le moteur n'a pas démarré (mot de passe administrateur refusé ?)")
 		engineCmd.Wait()
@@ -593,16 +599,103 @@ func runGUI() int {
 	} else if p, err := exec.LookPath("bernard-window"); err == nil {
 		window = p
 	}
-	if window != "" {
-		exec.Command(window, url).Run() // bloque jusqu'à la fermeture de la fenêtre
-		stdin.Close()
-	} else {
-		fmt.Println("Fenêtre dédiée absente : ouverture dans le navigateur.")
+	seen := make(chan struct{})
+	go func() {
+		for {
+			l, err := rd.ReadString('\n')
+			if strings.TrimSpace(l) == "CLIENT" {
+				close(seen)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	if window != "" && !browser {
+		wc := exec.Command(window, url)
+		wc.Env = windowEnv(os.Environ())
+		wc.Stderr = os.Stderr
+		if err := wc.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, "Fenêtre dédiée impossible à ouvrir :", err)
+			browser = true
+		} else {
+			exited := make(chan struct{})
+			go func() { wc.Wait(); close(exited) }()
+			select {
+			case <-seen:
+				<-exited // fenêtre fonctionnelle : on attend sa fermeture
+				stdin.Close()
+			case <-exited:
+				stdin.Close() // fermée avant d'avoir chargé
+			case <-time.After(WindowTimeout):
+				// Fenêtre restée vide (moteur d'affichage bloqué par la
+				// sécurité du système, pilote graphique…) : on bascule
+				// dans le navigateur, sans perdre la session.
+				fmt.Fprintln(os.Stderr, "La fenêtre dédiée ne s'affiche pas : ouverture de Bernard dans le navigateur.")
+				wc.Process.Kill()
+				<-exited
+				browser = true
+				rememberBrowser()
+			}
+		}
+	}
+	if window == "" || browser {
+		if window == "" {
+			fmt.Println("Fenêtre dédiée absente : ouverture dans le navigateur.")
+		}
 		exec.Command("xdg-open", url).Start()
 		fmt.Println("Fermez Bernard depuis la fenêtre, ou ici avec Ctrl+C.")
 	}
 	engineCmd.Wait()
 	return 0
+}
+
+// WindowTimeout : délai laissé à la fenêtre dédiée pour afficher la page.
+var WindowTimeout = 12 * time.Second
+
+// Quand la fenêtre dédiée n'a pas pu s'afficher sur cet ordinateur (moteur
+// d'affichage web du système en panne), Bernard s'en souvient et ouvre
+// directement le navigateur les fois suivantes. Supprimer ce fichier fait
+// réessayer la fenêtre.
+func browserMarker() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "bernard", "navigateur")
+}
+
+func browserRemembered() bool {
+	p := browserMarker()
+	return p != "" && fileExists(p)
+}
+
+func rememberBrowser() {
+	if p := browserMarker(); p != "" && os.Getuid() != 0 {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("La fenêtre dédiée de Bernard ne s'affiche pas sur cet ordinateur : Bernard s'ouvre dans le navigateur.\nSupprimez ce fichier pour réessayer la fenêtre.\n"), 0o644)
+	}
+}
+
+// windowEnv prépare l'environnement de la fenêtre. Sur des cartes
+// graphiques anciennes (Intel HD 3000, par exemple) ou avec certains pilotes,
+// le rendu accéléré de WebKitGTK affiche une fenêtre toute blanche. Bernard
+// n'a besoin d'aucune accélération : on la coupe, sauf si l'utilisateur a
+// déjà fixé ces variables lui-même.
+func windowEnv(env []string) []string {
+	set := map[string]bool{}
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			set[k] = true
+		}
+	}
+	for _, kv := range []string{"WEBKIT_DISABLE_DMABUF_RENDERER=1", "WEBKIT_DISABLE_COMPOSITING_MODE=1"} {
+		k, _, _ := strings.Cut(kv, "=")
+		if !set[k] {
+			env = append(env, kv)
+		}
+	}
+	return env
 }
 
 func fileExists(p string) bool {

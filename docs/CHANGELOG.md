@@ -1,7 +1,19 @@
 # Historique des versions
 
-## 0.3.1 — à venir
+## 0.3.1 — 27 septembre 2026
 
+- Fenêtre vide au lancement sur certains ordinateurs (cartes graphiques
+  anciennes, par exemple Intel HD 3000) : le rendu accéléré de WebKitGTK est
+  désormais coupé pour la fenêtre de Bernard, qui n'en a pas besoin.
+- Si la fenêtre dédiée n'a pas chargé l'assistant au bout de 12 secondes,
+  Bernard la ferme et ouvre l'assistant dans le navigateur, sans perdre la
+  session, et s'en souvient : les fois suivantes, il ouvre directement le
+  navigateur sur cet ordinateur (fichier `~/.config/bernard/navigateur`, à
+  supprimer pour réessayer la fenêtre). Cas rencontré : un HP ProBook sous
+  Zorin OS 18.1 dont le moteur d'affichage web du système ne fonctionne pas
+  (l'aide de Zorin, Yelp, y est vide aussi). Les messages d'erreur de la
+  fenêtre s'affichent désormais dans le terminal.
+- `bernard gui --browser` ouvre directement l'assistant dans le navigateur.
 - Publication : les versions 0.x ne sont plus marquées « préversion », pour
   que le lien fixe `releases/latest/download/bernard_amd64.deb` désigne
   bien la dernière version.

@@ -27,6 +27,12 @@ effectué en dehors du bac à sable ».
 Un seul paquet, fenêtre dédiée comprise. Sur une machine qui avait la 0.1,
 l'ancien paquet `bernard-window` est retiré automatiquement.
 
+Fenêtre vide : sur certains ordinateurs, le moteur d'affichage web du
+système ne fonctionne pas (l'aide de Zorin y est vide aussi). Bernard le
+détecte en quelques secondes et s'ouvre alors dans le navigateur ; il s'en
+souvient pour les fois suivantes. `bernard gui --browser` force le
+navigateur.
+
 Pare-feu : si `sudo ufw status` indique « active » sur la cible, ouvrez
 `sudo ufw allow 51515/udp` et `sudo ufw allow 51516/tcp`.
 

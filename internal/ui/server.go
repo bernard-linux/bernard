@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -25,10 +26,14 @@ var webFS embed.FS
 // d'événements) ; en-tête Host vérifié pour déjouer le « DNS rebinding » ;
 // aucune ressource externe chargée par la page.
 type Server struct {
-	Ctrl  *Controller
-	Token string
-	ln    net.Listener
-	srv   *http.Server
+	// OnClient est appelé une fois, quand la page de l'assistant a chargé
+	// et interroge le moteur : la fenêtre fonctionne.
+	OnClient   func()
+	clientOnce sync.Once
+	Ctrl       *Controller
+	Token      string
+	ln         net.Listener
+	srv        *http.Server
 }
 
 // NewServer ouvre l'écoute sur un port libre de 127.0.0.1.
@@ -153,13 +158,23 @@ func (s *Server) post(f func(http.ResponseWriter, *http.Request) error) http.Han
 	}
 }
 
+func (s *Server) clientSeen() {
+	s.clientOnce.Do(func() {
+		if s.OnClient != nil {
+			s.OnClient()
+		}
+	})
+}
+
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	s.clientSeen()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.Ctrl.Snapshot())
 }
 
 // handleEvents diffuse l'état complet à chaque changement (Server-Sent Events).
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	s.clientSeen()
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "flux non pris en charge", http.StatusInternalServerError)

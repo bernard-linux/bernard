@@ -52,9 +52,12 @@ Tout se fait dans l'interface graphique, sur les deux machines.
 4. Cible : vérifier l'écran de choix (comptes, dossiers, applications), lancer.
    La source affiche « Faites votre choix », puis « Installation des comptes
    et des applications », puis la progression de l'envoi.
-5. Pendant l'envoi, en Wi-Fi : **brancher un câble réseau** sur les deux
-   machines (ou vers la box). En moins de 15 secondes, le champ « Liaison »
-   de la source doit passer à « Câble réseau (RJ45) » et le débit augmenter.
+5. Pendant l'envoi, en Wi-Fi : **brancher un câble réseau** entre les deux
+   machines (ou de chacune vers la box). Vers la box : en moins de 15
+   secondes, le champ « Liaison » de la source doit passer à « Câble réseau
+   (RJ45) » et le débit augmenter. Câble direct d'un PC à l'autre : compter
+   environ 30 secondes (Bernard attend 12 secondes un éventuel DHCP, puis
+   donne lui-même une adresse en 169.254.x.x à chaque côté).
    Puis débrancher le câble : bandeau « Liaison perdue », reprise seule par le
    Wi-Fi.
 6. Tester « Arrêter » sur la source : la cible affiche un nouveau code ;

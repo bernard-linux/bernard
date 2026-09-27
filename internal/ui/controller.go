@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/directlink"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/engine"
 	"github.com/bernard-linux/bernard/internal/inventory"
@@ -126,6 +127,8 @@ type Controller struct {
 
 	ctx  context.Context // contexte de l'opération en cours
 	lock *keepawake.Lock // pas de mise en veille pendant une opération
+	// cable rend utilisable un câble direct entre les deux ordinateurs.
+	cable *directlink.Watcher
 
 	// Côté ancien ordinateur.
 	tracker  *discovery.Tracker
@@ -229,6 +232,7 @@ func (c *Controller) begin() (context.Context, error) {
 	// Un ordinateur en veille disparaît du réseau : la veille est bloquée
 	// tant que Bernard attend ou transfère.
 	c.lock = keepawake.Acquire("Bernard : migration en cours")
+	c.cable = directlink.Start(c.log)
 	return ctx, nil
 }
 
@@ -239,10 +243,11 @@ func (c *Controller) end() {
 		c.cancel = nil
 	}
 	c.ctx, c.tracker = nil, nil
-	lock := c.lock
-	c.lock = nil
+	lock, cable := c.lock, c.cable
+	c.lock, c.cable = nil, nil
 	c.mu.Unlock()
 	lock.Release()
+	cable.Stop()
 }
 
 // ---------------------------------------------------------------- réseau

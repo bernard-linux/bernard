@@ -16,6 +16,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/agent"
 	"github.com/bernard-linux/bernard/internal/collect/linux"
+	"github.com/bernard-linux/bernard/internal/directlink"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/keepawake"
@@ -179,6 +180,10 @@ func runConnect(ctx context.Context, args []string) int {
 	if lock == nil {
 		fmt.Println("Remarque : impossible de bloquer la mise en veille ; désactivez-la le temps de la migration.")
 	}
+
+	// Câble direct entre les deux ordinateurs : adresse automatique.
+	cable := directlink.Start(func(m string) { fmt.Println(m) })
+	defer cable.Stop()
 
 	// Une seule écoute des balises : attente, reconnexion, câble branché.
 	tr, err := discovery.Track(ctx, 0)

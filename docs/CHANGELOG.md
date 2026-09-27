@@ -1,5 +1,18 @@
 # Historique des versions
 
+## 0.3.2 — 27 septembre 2026
+
+- **Câble réseau direct entre les deux ordinateurs** (sans box) : Linux
+  n'y trouvait pas d'adresse (« l'activation de la connexion réseau a
+  échoué ») et le transfert restait en Wi-Fi. Bernard repère désormais un
+  câble branché resté sans adresse pendant 12 secondes et y active une
+  connexion provisoire en « lien local » : chaque ordinateur prend seul une
+  adresse en 169.254.x.x, et le transfert bascule sur le câble. Même chose
+  pour un câble Thunderbolt. La connexion provisoire (`bernard-cable-…`) est
+  retirée à la fin, y compris après un arrêt brutal (au lancement suivant).
+  Un câble vers une box, qui reçoit son adresse normalement, n'est pas
+  touché.
+
 ## 0.3.1 — 27 septembre 2026
 
 - Fenêtre vide au lancement sur certains ordinateurs (cartes graphiques

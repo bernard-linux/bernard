@@ -147,7 +147,7 @@ func (s *Server) list(w io.Writer, id string) error {
 		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: err.Error()})
 	}
 	var sendErr error
-	walkErr := source.Walk(ds.Path, ds.Excluded, func(e source.Entry) error {
+	walkErr := source.WalkDataSet(ds.Path, ds.Excluded, ds.Include, func(e source.Entry) error {
 		b, _ := json.Marshal(e)
 		sendErr = wire.WriteJSON(w, wire.Msg{Type: wire.MsgEntry, Body: b})
 		return sendErr
@@ -173,7 +173,7 @@ func (s *Server) get(w io.Writer, id, rel string, offset int64) error {
 	if err != nil {
 		return refuse(err)
 	}
-	if source.Excluded(rel, ds.Excluded) {
+	if source.Excluded(rel, ds.Excluded) || !source.NewIncluder(ds.Include).File(rel) {
 		return refuse(source.ErrOutsideRoot)
 	}
 	f, info, err := source.OpenRegular(ds.Path, rel)

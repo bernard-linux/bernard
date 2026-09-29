@@ -135,6 +135,8 @@ type Plan struct {
 	Target    Target    `json:"target"`
 	Actions   []Action  `json:"actions"`
 	Totals    Totals    `json:"totals"`
+	// Trimmed : données hors dossiers personnels décochées faute de place.
+	Trimmed []string `json:"trimmed,omitempty"`
 	// Freed : place libérée par les retraits sélectionnés.
 	Freed int64 `json:"freed,omitempty"`
 	// Blocked empêche le démarrage (espace insuffisant…) ; Reason explique.
@@ -192,7 +194,12 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	}
 
 	// 3. Données.
+	sysSets := map[string]inventory.DataSet{}
 	for _, d := range inv.DataSets {
+		if d.Kind == "system" {
+			sysSets[d.System] = d
+			continue
+		}
 		login := logins[d.User]
 		add(Action{
 			Op: OpCopy, From: d.ID, Label: d.Path, Login: login,
@@ -238,8 +245,15 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	// 4 ter. Données hors des dossiers personnels : détectées et montrées ;
 	// leur copie arrive avec la version 0.5.
 	for _, it := range inv.System {
-		add(Action{Op: OpSystemData, From: it.ID, Label: it.Label, Files: it.Files, Bytes: it.Bytes, Used: it.Used,
-			Reason: it.Kind, Suggestion: it.Advice, Also: it.Detail, Fidelity: FidelityNone, Selected: false})
+		a := Action{Op: OpSystemData, From: it.ID, Label: it.Label, Files: it.Files, Bytes: it.Bytes, Used: it.Used,
+			Reason: it.Kind, Suggestion: it.Advice, Also: it.Detail, Fidelity: FidelityNone}
+		if d, ok := sysSets[it.ID]; ok {
+			// Copié à l'identique, au même endroit ; coché quand Bernard le
+			// conseille, à examiner sinon.
+			a.Fidelity, a.To, a.Package = FidelityFull, d.Dest, d.ID
+			a.Selected = it.Advice == inventory.AdviceCopy
+		}
+		add(a)
 	}
 
 	// 5. Réseau et imprimantes.
@@ -253,8 +267,35 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	for i := range p.Actions {
 		p.Actions[i].ID = "p" + strconv.Itoa(i+1)
 	}
-	p.checkSpace()
+	p.Recheck()
+	p.fitSystemData()
 	return p, nil
+}
+
+// fitSystemData : si tout ne tient pas sur la cible mais que les dossiers
+// personnels tiennent, les données hors dossiers personnels sont décochées,
+// des plus grosses aux plus petites, jusqu'à ce que le reste tienne. Jamais
+// bloquant pour les dossiers personnels ; l'interface prévient et renvoie
+// vers le détail (Trimmed).
+func (p *Plan) fitSystemData() {
+	if !p.Blocked {
+		return
+	}
+	var idx []int
+	for i, a := range p.Actions {
+		if a.Op == OpSystemData && a.Selected {
+			idx = append(idx, i)
+		}
+	}
+	sort.Slice(idx, func(x, y int) bool { return p.Actions[idx[x]].Used > p.Actions[idx[y]].Used })
+	for _, i := range idx {
+		p.Actions[i].Selected = false
+		p.Trimmed = append(p.Trimmed, p.Actions[i].Label)
+		p.Recheck()
+		if !p.Blocked {
+			return
+		}
+	}
 }
 
 // appAction applique les règles de la section « Décisions prises » :
@@ -305,7 +346,7 @@ func appAction(app inventory.App, t Target) Action {
 func (p *Plan) Recheck() {
 	p.Totals = Totals{}
 	for _, a := range p.Actions {
-		if a.Op == OpCopy && a.Selected {
+		if (a.Op == OpCopy || a.Op == OpSystemData) && a.Selected {
 			p.Totals.Files += a.Files
 			p.Totals.Bytes += a.Bytes
 		}
@@ -321,6 +362,8 @@ func (p *Plan) checkSpace() {
 		switch {
 		case a.Op == OpCopy && a.Selected:
 			need += a.Bytes
+		case a.Op == OpSystemData && a.Selected:
+			need += a.Used
 		case a.Op == OpRemove && a.Selected:
 			p.Freed += a.Bytes
 		}

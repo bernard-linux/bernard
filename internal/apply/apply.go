@@ -463,6 +463,7 @@ type UndoReport struct {
 	UsersDeleted []string `json:"usersDeleted,omitempty"`
 	Removed      []string `json:"removed,omitempty"`
 	Reinstalled  []string `json:"reinstalled,omitempty"`
+	Restored     []string `json:"restored,omitempty"` // fichiers de la cible remis en place
 	Errors       []string `json:"errors,omitempty"`
 }
 

@@ -497,6 +497,9 @@ const screens = {
         <span class="meta"> ${skipWhy(a)}</span></span><span></span></li>`).join("")}</ul>` : ""}
       ${removals.length ? `<p class="meta" id="rm-summary"></p>` : ""}
 
+      ${p.trimmed?.length ? `<p class="banner warn">Tout ne tient pas sur ce disque : ${plural(p.trimmed.length, "élément", "éléments")} hors des dossiers personnels
+        ${p.trimmed.length > 1 ? "ont été décochés" : "a été décoché"} (${p.trimmed.map(esc).join(", ")}). Vos dossiers personnels passent en priorité ;
+        ajustez ci-dessous ce que vous voulez emporter.</p>` : ""}
       ${sysdata.length ? systemDataSection(sysdata) : ""}
 
       ${net.length ? `<h2>Réseau et imprimantes</h2><ul class="list">${net.map(a => a.op === "importWifi"
@@ -760,6 +763,7 @@ function updateSummary(s) {
   for (const a of p.actions) {
     if (!ui.selected[a.id]) continue;
     if (a.op === "copy" && loginOn[a.login] !== false) need += a.bytes;
+    if (a.op === "systemData") need += a.used || a.bytes || 0;
     if (a.op === "install") apps++;
     if (a.op === "remove") { rm++; freed += a.bytes || 0; }
   }
@@ -910,17 +914,29 @@ function sysMeta(a) {
   const sparse = a.used && a.bytes && a.used < a.bytes * 0.8 ? ` (${bytes(a.used)} réellement occupés : fichiers creux)` : "";
   return [size + sparse, files].filter(Boolean).join(", ") + ". " + (ADVICE[a.suggestion] || "");
 }
+const LATER = {
+  database: "Copie avec arrêt du service : prochaine version.",
+  container: "Copie avec arrêt du service : prochaine version.",
+  vm: "Copie des disques virtuels avec arrêt des machines : prochaine version.",
+  appserver: "Copie avec arrêt du serveur : prochaine version.",
+  disk: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
+  homeelse: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
+  steam: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
+  backup: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
+};
 function systemDataSection(items) {
   const total = items.filter(a => a.suggestion !== "skip").reduce((n, a) => n + (a.used || a.bytes || 0), 0);
+  const details = a => a.also?.length ? `<details><summary>${plural(a.also.length, "fichier", "fichiers")}</summary><pre class="log">${esc(a.also.join("\n"))}</pre></details>` : "";
+  const tag = a => `<span class="tag ${a.fidelity === "full" ? "full" : "none"}">${esc(SYSKIND[a.reason] || "Données")}</span>`;
   return `<h2>Hors des dossiers personnels</h2>
     <p class="meta">Bernard a examiné tout le disque de l'ancien ordinateur. Voici ce qui n'appartient ni au système
-    ni à vos dossiers personnels${total ? ` (environ ${bytes(total)} hors sauvegardes)` : ""}.
-    <strong>La copie de ces éléments arrive dans la prochaine version de Bernard</strong> : pour l'instant, ils restent
-    sur l'ancien ordinateur et figurent au bilan.</p>
-    <ul class="list">${items.map(a => `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span><br>
-      <span class="meta">${sysMeta(a)}</span>
-      ${a.also?.length ? `<details><summary>${plural(a.also.length, "fichier", "fichiers")}</summary><pre class="log">${esc(a.also.join("\n"))}</pre></details>` : ""}
-      </span><span class="tag none">${esc(SYSKIND[a.reason] || "Données")}</span></li>`).join("")}</ul>`;
+    ni à vos dossiers personnels${total ? ` (environ ${bytes(total)} hors sauvegardes)` : ""}. Chaque élément est copié
+    au même endroit, avec ses propriétaires et ses droits ; un fichier déjà présent ici est mis de côté, et
+    « Annuler la migration » le remet en place.</p>
+    <ul class="list">${items.map(a => a.fidelity === "full"
+      ? row(a, esc(a.label), sysMeta(a) + details(a), tag(a))
+      : `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span><br>
+        <span class="meta">${sysMeta(a)} ${LATER[a.reason] || ""}</span>${details(a)}</span>${tag(a)}</li>`).join("")}</ul>`;
 }
 
 function extraAccountsSection(s) {
@@ -940,10 +956,11 @@ function extraAccountsSection(s) {
 }
 
 function stayed(s) {
-  const items = (s.plan?.actions || []).filter(a => a.op === "systemData");
+  const items = (s.plan?.actions || []).filter(a => a.op === "systemData" && !a.selected);
   if (!items.length || s.undo) return "";
   return `<h2>Resté sur l'ancien ordinateur</h2>
-    <p>Ces éléments hors des dossiers personnels n'ont pas encore été copiés. Gardez l'ancien ordinateur tant qu'ils ne sont pas repris.</p>
+    <p>Ces éléments hors des dossiers personnels n'ont pas été copiés (non cochés, ou copie prévue dans une prochaine version).
+    Gardez l'ancien ordinateur tant qu'ils ne sont pas repris.</p>
     <ul class="list">${items.map(a => `<li><span></span><span><span class="name">${esc(a.label)}</span><br>
       <span class="meta">${sysMeta(a)}</span></span><span></span></li>`).join("")}</ul>`;
 }

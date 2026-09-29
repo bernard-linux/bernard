@@ -210,6 +210,13 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 	if err != nil {
 		return res, err
 	}
+	sys, err := apply.CopySystem(ctx, r, s.Plan, s.Inv)
+	for id, rep := range sys {
+		res.Data[id] = rep
+	}
+	if err != nil {
+		return res, err
+	}
 
 	if h.Phase != nil {
 		h.Phase("settings")
@@ -248,6 +255,12 @@ func Undo(ctx context.Context, journalPath string) (*engine.UndoReport, *apply.U
 	if len(st.Sys) > 0 {
 		sys = apply.UndoSystem(ctx, st, system.New(), settings.New(filepath.Dir(journalPath)))
 		sys.Errors = append(sys.Errors, prefErrs...)
+		restored, errs := apply.UndoReplaced(st)
+		sys.Restored = restored
+		sys.Errors = append(sys.Errors, errs...)
+		if len(restored) > 0 {
+			sysexec.Run(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"daemon-reload"}})
+		}
 	}
 	return files, sys, nil
 }

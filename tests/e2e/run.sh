@@ -54,6 +54,17 @@ ssid=E2E-Maison
 key-mgmt=wpa-psk
 psk=secret-e2e
 NM
+# Données hors des dossiers personnels (0.5) : logiciel dans /opt (avec un
+# fichier creux), site web appartenant à www-data, réglage ajouté dans /etc,
+# réglage qui remplace celui de la cible, dossier ajouté à la racine.
+mkdir -p $SRC/opt/e2eappli/bin $SRC/var/www/html/e2esite $SRC/data/e2eprojets
+printf '#!/bin/sh\necho outil\n' > $SRC/opt/e2eappli/bin/outil && chmod 755 $SRC/opt/e2eappli/bin/outil
+truncate -s 200M $SRC/opt/e2eappli/disque.img && echo "données" | dd of=$SRC/opt/e2eappli/disque.img bs=1 seek=100000000 conv=notrunc 2>/dev/null
+echo "<?php echo 'e2e';" > $SRC/var/www/html/e2esite/index.php && chown -R 33:33 $SRC/var/www/html/e2esite
+echo "reglage=e2e" > $SRC/etc/e2e-appli.conf
+echo "version de l'ancien PC" > $SRC/etc/e2e-remplace.conf
+echo "version du nouveau PC" > /etc/e2e-remplace.conf
+echo "plan" > $SRC/data/e2eprojets/plan.txt
 BEFORE=$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)
 
 echo "== Migration (nouveau mot de passe demandé pour e2ebob)"
@@ -88,6 +99,12 @@ check "lien symbolique recréé"                    test "$(readlink /home/e2eal
 check "cache exclu"                               test ! -e /home/e2ealice/.cache/x
 check "tâches planifiées reprises"                bash -c "crontab -u e2ealice -l | grep -q sauvegarde"
 check "Wi-Fi repris en 600, sans nom d'interface" bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-Maison*); test \$(stat -c %a \$f) = 600 && ! grep -q interface-name \$f && grep -q psk=secret-e2e \$f"
+check "/opt : logiciel copié, exécutable"        test -x /opt/e2eappli/bin/outil
+check "/opt : fichier creux resté creux"          bash -c "cmp $SRC/opt/e2eappli/disque.img /opt/e2eappli/disque.img && test \$(du -k /opt/e2eappli/disque.img | cut -f1) -lt 10240"
+check "site web copié, propriétaire www-data"     test "$(stat -c %u /var/www/html/e2esite/index.php)" = 33
+check "/etc : réglage ajouté"                     grep -q reglage=e2e /etc/e2e-appli.conf
+check "/etc : réglage de l'ancien PC en place"    grep -q "ancien PC" /etc/e2e-remplace.conf
+check "dossier /data copié"                       test -f /data/e2eprojets/plan.txt
 check "source strictement inchangée"             test "$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)" = "$BEFORE"
 
 echo "== Annulation"
@@ -96,9 +113,15 @@ $BIN/bernard undo --journal "$JOURNAL" >> $LOG 2>&1
 check "comptes supprimés"                         bash -c "! getent passwd e2ealice && ! getent passwd e2ebob"
 check "fichiers copiés retirés"                   test ! -e /home/e2ealice/Images/album.tar
 check "Wi-Fi retiré"                              bash -c "! ls /etc/NetworkManager/system-connections/bernard-E2E* 2>/dev/null"
+check "/opt : logiciel retiré"                    test ! -e /opt/e2eappli/bin/outil
+check "/etc : réglage ajouté retiré"              test ! -e /etc/e2e-appli.conf
+check "/etc : réglage du nouveau PC remis"        grep -q "nouveau PC" /etc/e2e-remplace.conf
+check "dossier /data retiré"                      test ! -e /data/e2eprojets/plan.txt
 
 # Nettoyage
-rm -rf /home/e2ealice /home/e2ebob "$(dirname "$JOURNAL")" $SRC
+rm -rf /home/e2ealice /home/e2ebob "$(dirname "$JOURNAL")" $SRC /opt/e2eappli /var/www/html/e2esite /data/e2eprojets
+rm -f /etc/e2e-remplace.conf /etc/e2e-appli.conf
+rmdir /data 2>/dev/null
 crontab -u e2ealice -r 2>/dev/null
 echo
 if [ $FAILS -eq 0 ]; then echo "Test de bout en bout réussi."; rm -f $LOG $LOG.agent; exit 0; fi

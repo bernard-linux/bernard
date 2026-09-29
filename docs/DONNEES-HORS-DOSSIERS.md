@@ -46,9 +46,21 @@ les fichiers creux (disques virtuels) devront être copiés creux.
    système, puis sauvegardes ; alerte, journal, et renvoi vers les options
    avancées.
 
+## Copie (version 0.5)
+
+- Jeux de données « system » dans l'inventaire : chemin, destination
+  identique, liste d'inclusion (fichiers non fournis par un paquet, ou
+  fichiers de `/etc` modifiés).
+- Propriétaires par nom, droits (setuid/setgid compris), dates ; fichiers
+  creux conservés.
+- Fichier présent sur la cible : mis de côté dans
+  `/var/lib/bernard/<migration>/avant-migration/`, remis par l'annulation.
+- Destinations autorisées : `/etc`, `/opt/…`, `/srv/…`, `/usr/local`,
+  `/var/www`, `/var/lib/…` (sauf dpkg, apt, snapd, flatpak, systemd,
+  bernard), `/root`, `/home/…` sans compte, dossiers ajoutés à la racine.
+
 ## Suite
 
-- 0.5 : copie (propriétaires, droits, ACL, attributs étendus, liens durs,
-  fichiers creux), `/etc` comparé à la cible, dépôts tiers, services
-  systemd, annulation.
+- 0.5.x : dépôts de logiciels tiers et leurs clés ; liens durs, ACL et
+  attributs étendus.
 - 0.6 : copie cohérente des bases (export/import) et des services arrêtés.

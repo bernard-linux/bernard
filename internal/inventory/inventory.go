@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -97,6 +98,14 @@ type DataSet struct {
 	Files     int64    `json:"files"`
 	SizeBytes int64    `json:"sizeBytes"`
 	Excluded  []string `json:"excluded,omitempty"` // chemins relatifs exclus par défaut
+	// Include limite la copie à ces chemins relatifs (fichiers de /etc
+	// modifiés, fichiers de /opt n'appartenant à aucun paquet…). Vide : tout.
+	Include []string `json:"include,omitempty"`
+	// Dest : emplacement sur la cible, pour les données hors des dossiers
+	// personnels (même chemin que sur la source).
+	Dest string `json:"dest,omitempty"`
+	// System : identifiant du SystemItem que ce jeu de données copie.
+	System string `json:"system,omitempty"`
 }
 
 // Genres de données hors des dossiers personnels.
@@ -175,6 +184,12 @@ func (inv *Inventory) Validate() error {
 		users[u.ID] = true
 	}
 	for _, d := range inv.DataSets {
+		if d.Kind == "system" {
+			if d.Dest == "" || !strings.HasPrefix(d.Dest, "/") || strings.Contains(d.Dest, "..") {
+				return fmt.Errorf("jeu de données %s : destination refusée %q", d.ID, d.Dest)
+			}
+			continue
+		}
 		if !users[d.User] {
 			return fmt.Errorf("jeu de données %s rattaché à un utilisateur inconnu %q", d.ID, d.User)
 		}

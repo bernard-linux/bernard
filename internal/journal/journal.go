@@ -49,6 +49,10 @@ const (
 	// SysAutoLoginOff : ouverture de session automatique coupée. Name =
 	// fichier de configuration, Dst = sauvegarde.
 	SysAutoLoginOff = "autoLoginOff"
+	// SysReplaced : fichier de la cible mis de côté pour laisser place à
+	// celui de l'ancien ordinateur (hors dossiers personnels). Name = chemin,
+	// Dst = emplacement de la version mise de côté.
+	SysReplaced = "replaced"
 )
 
 // Record est une ligne du journal.

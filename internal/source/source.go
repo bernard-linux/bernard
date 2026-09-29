@@ -13,8 +13,13 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/user"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bernard-linux/bernard/internal/inventory"
@@ -39,6 +44,11 @@ type Entry struct {
 	Mode  fs.FileMode `json:"mode"`
 	MTime time.Time   `json:"mtime"`
 	Link  string      `json:"link,omitempty"` // cible d'un lien symbolique
+	// User et Group : propriétaire sur la source, par nom (les numéros
+	// diffèrent d'une machine à l'autre). Servent hors des dossiers
+	// personnels, où chaque fichier garde son propriétaire (mysql, www-data…).
+	User  string `json:"user,omitempty"`
+	Group string `json:"group,omitempty"`
 }
 
 // FileStream est le contenu d'un fichier à partir d'un décalage. Après avoir
@@ -112,6 +122,9 @@ func Walk(root string, excludes []string, fn func(Entry) error, onErr func(rel s
 			return nil
 		}
 		e := Entry{Rel: rel, Mode: info.Mode(), MTime: info.ModTime()}
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			e.User, e.Group = ownerNames(st.Uid, st.Gid)
+		}
 		switch {
 		case d.IsDir():
 			e.Kind = KindDir
@@ -130,6 +143,74 @@ func Walk(root string, excludes []string, fn func(Entry) error, onErr func(rel s
 		}
 		return fn(e)
 	})
+}
+
+var (
+	namesMu sync.Mutex
+	users   = map[uint32]string{}
+	groups  = map[uint32]string{}
+)
+
+// ownerNames traduit UID et GID en noms (mis en cache).
+func ownerNames(uid, gid uint32) (string, string) {
+	namesMu.Lock()
+	defer namesMu.Unlock()
+	u, ok := users[uid]
+	if !ok {
+		if x, err := user.LookupId(strconv.Itoa(int(uid))); err == nil {
+			u = x.Username
+		}
+		users[uid] = u
+	}
+	g, ok := groups[gid]
+	if !ok {
+		if x, err := user.LookupGroupId(strconv.Itoa(int(gid))); err == nil {
+			g = x.Name
+		}
+		groups[gid] = g
+	}
+	return u, g
+}
+
+// Includer limite un jeu de données à une liste de chemins relatifs (et aux
+// dossiers qui les contiennent). Liste vide : tout est inclus.
+type Includer struct {
+	files map[string]bool
+	dirs  map[string]bool
+}
+
+// NewIncluder prépare le filtre.
+func NewIncluder(include []string) *Includer {
+	if len(include) == 0 {
+		return nil
+	}
+	in := &Includer{files: map[string]bool{}, dirs: map[string]bool{}}
+	for _, p := range include {
+		p = strings.Trim(p, "/")
+		in.files[p] = true
+		for d := path.Dir(p); d != "." && d != "/"; d = path.Dir(d) {
+			in.dirs[d] = true
+		}
+	}
+	return in
+}
+
+// Dir indique qu'un dossier mène à un chemin inclus.
+func (in *Includer) Dir(rel string) bool { return in == nil || in.dirs[rel] || in.files[rel] }
+
+// File indique qu'un fichier est inclus.
+func (in *Includer) File(rel string) bool { return in == nil || in.files[rel] }
+
+// WalkDataSet parcourt un jeu de données : exclusions, puis liste
+// d'inclusion éventuelle.
+func WalkDataSet(root string, excludes, include []string, fn func(Entry) error, onErr func(rel string, err error)) error {
+	in := NewIncluder(include)
+	return Walk(root, excludes, func(e Entry) error {
+		if e.Kind == KindDir && !in.Dir(e.Rel) || e.Kind != KindDir && !in.File(e.Rel) {
+			return nil
+		}
+		return fn(e)
+	}, onErr)
 }
 
 // SafeJoin résout rel sous root en refusant toute sortie de la racine,

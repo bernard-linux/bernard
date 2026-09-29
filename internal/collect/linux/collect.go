@@ -83,7 +83,9 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 		if opt.Root == "/" {
 			mountsFile = "/proc/self/mounts"
 		}
-		inv.System, inv.Disks = ScanSystem(opt.Root, mountsFile, inv.Users)
+		var sys []inventory.DataSet
+		inv.System, inv.Disks, sys = ScanSystem(opt.Root, mountsFile, inv.Users)
+		inv.DataSets = append(inv.DataSets, sys...)
 	}
 	inv.Packages = allPackages(opt.Root)
 	inv.PackagesRemoved = removedPackages(opt.Root, inv.Packages)

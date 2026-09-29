@@ -25,7 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bernard-linux/bernard/internal/apply"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/engine"
 	"github.com/bernard-linux/bernard/internal/inventory"
@@ -36,7 +35,6 @@ import (
 	"github.com/bernard-linux/bernard/internal/plan"
 	"github.com/bernard-linux/bernard/internal/remote"
 	"github.com/bernard-linux/bernard/internal/session"
-	"github.com/bernard-linux/bernard/internal/settings"
 	"github.com/bernard-linux/bernard/internal/source"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/system"
@@ -415,7 +413,7 @@ func runUndo(args []string) int {
 		fmt.Fprintln(os.Stderr, "Cette migration a créé des comptes ou installé des applications : lancez l'annulation avec sudo.")
 		return 1
 	}
-	rep, err := engine.Undo(*jp)
+	rep, u, err := migrate.Undo(context.Background(), *jp)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Annulation impossible :", err)
 		return 1
@@ -425,10 +423,15 @@ func runUndo(args []string) int {
 	for _, k := range rep.Kept {
 		fmt.Println("Conservé (modifié depuis la copie) :", k)
 	}
-	if len(st.Sys) > 0 {
-		u := apply.UndoSystem(context.Background(), st, system.New(), settings.New(filepath.Dir(*jp)))
+	if u != nil {
 		for _, n := range u.Removed {
 			fmt.Println("Application retirée :", n)
+		}
+		for _, n := range u.Reinstalled {
+			fmt.Println("Application réinstallée :", n)
+		}
+		for _, n := range u.Restored {
+			fmt.Println("Fichier d'origine remis en place :", n)
 		}
 		for _, n := range u.UsersDeleted {
 			fmt.Printf("Compte supprimé : %s (son dossier personnel est conservé s'il contient encore des fichiers)\n", n)

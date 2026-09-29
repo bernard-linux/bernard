@@ -263,7 +263,7 @@ func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string
 
 	for _, ds := range inv.DataSets {
 		var list []entry
-		walkErr := source.Walk(ds.Path, ds.Excluded, func(e source.Entry) error {
+		walkErr := source.WalkDataSet(ds.Path, ds.Excluded, ds.Include, func(e source.Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}

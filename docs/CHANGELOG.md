@@ -1,5 +1,46 @@
 # Historique des versions
 
+## 0.5.0 — 29 septembre 2026
+
+**Copie des données hors des dossiers personnels.** Les éléments trouvés par
+l'examen du disque (0.4) sont maintenant copiés, cochés par défaut quand
+Bernard le conseille :
+
+- réglages système modifiés ou ajoutés (`/etc`), logiciels installés à la
+  main (`/opt`, `/usr/local`), données de service (`/srv`), sites web
+  (`/var/www`), dossiers ajoutés à la racine (`/data`…), dossiers de `/home`
+  sans compte, dossier de l'administrateur et données d'autres services (à
+  cocher : Bernard ne sait pas s'ils sont utiles) ;
+- **au même emplacement, avec leurs propriétaires d'origine** (retrouvés par
+  leur nom : `www-data`, `mysql`… ; root si le compte n'existe pas ici), leurs
+  droits, y compris setuid et setgid, et leurs dates ;
+- seuls les fichiers qui n'appartiennent à aucun paquet, ou les fichiers de
+  configuration modifiés, sont copiés : le reste est réinstallé ;
+- un fichier déjà présent sur le nouvel ordinateur est **mis de côté**
+  (`/var/lib/bernard/<migration>/avant-migration/`), et « Annuler la
+  migration » le remet en place ;
+- la cible refuse d'écrire ailleurs que dans ces emplacements (jamais dans
+  `/usr`, `/bin`, `/boot`…), et refuse aussi les fichiers de `/etc` propres à
+  la machine, même si l'ancien ordinateur les envoyait ;
+- services ajoutés ou modifiés dans `/etc/systemd` pris en compte
+  (`systemctl daemon-reload`).
+
+**Fichiers creux conservés**, pour toute la migration (dossiers personnels
+compris) : un disque virtuel de 100 Go qui n'en occupe que 20 garde ses
+20 Go sur le nouvel ordinateur. Le contenu est vérifié comme avant.
+
+**Cible plus petite** : si tout ne tient pas mais que les dossiers
+personnels tiennent, les données hors dossiers personnels sont décochées,
+des plus grosses aux plus petites, avec un avertissement ; vous ajustez sur
+l'écran de choix. L'espace nécessaire les compte désormais.
+
+Encore détectés seulement (copie dans la 0.6, avec arrêt du service) : bases
+de données, conteneurs, machines virtuelles, serveur FileMaker ; et les
+autres disques (choix de l'emplacement sur le nouvel ordinateur).
+
+`sudo bernard undo` utilise désormais exactement la même annulation que
+l'interface.
+
 ## 0.4.0 — 29 septembre 2026
 
 **Examen de tout le disque de l'ancien ordinateur.** Bernard repère désormais

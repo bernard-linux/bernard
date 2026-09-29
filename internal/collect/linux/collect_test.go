@@ -262,7 +262,20 @@ func TestScanSystem(t *testing.T) {
 	w("home/arnaud/Documents/a.txt", "a")
 	w("usr/local/bin/outil", "#!/bin/sh")
 
-	items, _ := ScanSystem(root, "", []inventory.User{{ID: "u1", Login: "arnaud", Home: "/home/arnaud"}})
+	items, _, sets := ScanSystem(root, "", []inventory.User{{ID: "u1", Login: "arnaud", Home: "/home/arnaud"}})
+	setBy := map[string]inventory.DataSet{}
+	for _, d := range sets {
+		setBy[d.Dest] = d
+	}
+	if d := setBy["/etc"]; strings.Join(d.Include, ",") != "ajout.conf,app.conf" || d.Kind != "system" {
+		t.Errorf("jeu /etc : %+v", d)
+	}
+	if d := setBy["/opt/monlogiciel"]; d.Include != nil {
+		t.Errorf("/opt/monlogiciel : aucun fichier de paquet, tout copier : %+v", d.Include)
+	}
+	if _, ok := setBy["/var/lib/mysql"]; ok {
+		t.Error("les bases sont copiées en 0.6, avec arrêt du service")
+	}
 	byLabel := map[string]inventory.SystemItem{}
 	for _, it := range items {
 		byLabel[it.Kind+"|"+it.Paths[0]] = it

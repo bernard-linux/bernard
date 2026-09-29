@@ -98,6 +98,10 @@ var etcMachine = []string{
 	"default/locale", "libreoffice/registry", "dpkg/origins", "ld.so.conf.d", "sensors3.conf", "sensors.d",
 }
 
+// EtcMachine indique un fichier de /etc propre à la machine, qui ne doit
+// jamais être repris (vérifié aussi côté cible).
+func EtcMachine(rel string) bool { return etcIsMachine(rel) }
+
 func etcIsMachine(rel string) bool {
 	for _, p := range etcMachine {
 		if rel == p || strings.HasPrefix(rel, p+"/") || (strings.HasSuffix(p, "_") && strings.HasPrefix(rel, p)) {
@@ -191,11 +195,23 @@ func measureTree(root string, skip func(rel string, d fs.DirEntry) bool) usage {
 
 // scanner examine un système (monté sur root).
 type scanner struct {
-	root    string
-	db      dpkgDB
-	items   []inventory.SystemItem
-	claimed map[string]bool // chemins déjà rattachés à un élément
+	root     string
+	db       dpkgDB
+	items    []inventory.SystemItem
+	datasets []inventory.DataSet
+	claimed  map[string]bool // chemins déjà rattachés à un élément
 }
+
+// Genres copiés depuis la version 0.5. Les bases, conteneurs, machines
+// virtuelles et serveurs d'application demandent l'arrêt du service pendant
+// la copie (version 0.6) ; les autres disques, un choix d'emplacement.
+var copyable = map[string]bool{
+	inventory.SysEtc: true, inventory.SysOpt: true, inventory.SysSrv: true, inventory.SysLocal: true,
+	inventory.SysWeb: true, inventory.SysCustom: true, inventory.SysRoot: true, inventory.SysService: true,
+}
+
+// Copyable indique si un genre de données est copié par cette version.
+func Copyable(kind string) bool { return copyable[kind] }
 
 func (s *scanner) abs(rel string) string { return "/" + strings.TrimPrefix(filepath.ToSlash(rel), "/") }
 
@@ -205,16 +221,82 @@ func (s *scanner) exists(rel string) bool {
 }
 
 func (s *scanner) add(it inventory.SystemItem) {
+	s.addWith(it, nil)
+}
+
+// addWith ajoute un élément ; include limite sa copie à ces chemins
+// (relatifs à son dossier), nil pour tout copier.
+func (s *scanner) addWith(it inventory.SystemItem, include []string) {
 	if it.Files == 0 && it.Bytes == 0 && it.Kind != inventory.SysDisk && it.Kind != inventory.SysBackup {
 		return
 	}
 	if it.Advice == "" {
 		it.Advice = inventory.AdviceCopy
 	}
+	it.ID = "s" + strconv.Itoa(len(s.items)+1)
 	s.items = append(s.items, it)
 	for _, p := range it.Paths {
 		s.claimed[strings.TrimPrefix(p, "/")] = true
 	}
+	if copyable[it.Kind] && len(it.Paths) == 1 {
+		s.datasets = append(s.datasets, inventory.DataSet{
+			ID: "x" + strconv.Itoa(len(s.datasets)+1), Kind: "system", System: it.ID,
+			Path: filepath.Join(s.root, it.Paths[0]), Dest: it.Paths[0],
+			Files: it.Files, SizeBytes: it.Bytes, Include: include,
+		})
+	}
+}
+
+// measureUnowned mesure un dossier sans les fichiers installés par les
+// paquets, et renvoie la liste des fichiers restants quand il y en avait
+// (nil : aucun fichier de paquet, tout est à copier).
+func (s *scanner) measureUnowned(rel string) (usage, []string) {
+	var u usage
+	var list []string
+	sawOwned := false
+	base := filepath.Join(s.root, rel)
+	filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == base {
+			if err != nil && d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		r, _ := filepath.Rel(base, p)
+		r = filepath.ToSlash(r)
+		full := s.abs(filepath.Join(rel, r))
+		if s.claimed[strings.TrimPrefix(full, "/")] {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if s.db.owned[full] {
+			sawOwned = true
+			return nil
+		}
+		if !(d.Type().IsRegular() || d.Type()&fs.ModeSymlink != 0) {
+			return nil
+		}
+		u.files++
+		list = append(list, r)
+		if fi, err := d.Info(); err == nil && d.Type().IsRegular() {
+			u.bytes += fi.Size()
+			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+				u.used += st.Blocks * 512
+			} else {
+				u.used += fi.Size()
+			}
+		}
+		return nil
+	})
+	if !sawOwned {
+		list = nil
+	}
+	return u, list
 }
 
 // unownedSkip ignore ce que les paquets ont installé sous base (relatif à la
@@ -251,7 +333,7 @@ func (s *scanner) recognized() {
 
 // etc relève les réglages système modifiés ou ajoutés.
 func (s *scanner) etc() {
-	var detail []string
+	var detail, include []string
 	var u usage
 	base := filepath.Join(s.root, "etc")
 	filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
@@ -279,6 +361,7 @@ func (s *scanner) etc() {
 			return nil
 		}
 		u.files++
+		include = append(include, rel)
 		if fi, err := d.Info(); err == nil && d.Type().IsRegular() {
 			u.bytes += fi.Size()
 			u.used += fi.Size()
@@ -289,8 +372,11 @@ func (s *scanner) etc() {
 		return nil
 	})
 	sort.Strings(detail)
-	s.add(inventory.SystemItem{Kind: inventory.SysEtc, Label: "Réglages système modifiés ou ajoutés (/etc)",
-		Paths: []string{"/etc"}, Files: u.files, Bytes: u.bytes, Used: u.used, Detail: detail})
+	if len(include) == 0 {
+		return
+	}
+	s.addWith(inventory.SystemItem{Kind: inventory.SysEtc, Label: "Réglages système modifiés ou ajoutés (/etc)",
+		Paths: []string{"/etc"}, Files: u.files, Bytes: u.bytes, Used: u.used, Detail: detail}, include)
 }
 
 func fileMD5(p string) string {
@@ -315,9 +401,9 @@ func (s *scanner) perChild(rel, kind, prefix string) {
 		if s.claimed[child] {
 			continue
 		}
-		u := s.measure(child, s.unownedSkip(child))
-		s.add(inventory.SystemItem{Kind: kind, Label: prefix + e.Name(), Paths: []string{s.abs(child)},
-			Files: u.files, Bytes: u.bytes, Used: u.used})
+		u, include := s.measureUnowned(child)
+		s.addWith(inventory.SystemItem{Kind: kind, Label: prefix + e.Name(), Paths: []string{s.abs(child)},
+			Files: u.files, Bytes: u.bytes, Used: u.used}, include)
 	}
 }
 
@@ -330,12 +416,12 @@ func (s *scanner) varLib() {
 		if !e.IsDir() || varLibSystem[e.Name()] || s.claimed[rel] {
 			continue
 		}
-		u := s.measure(rel, s.unownedSkip(rel))
+		u, include := s.measureUnowned(rel)
 		if u.bytes < 1<<20 {
 			continue
 		}
-		s.add(inventory.SystemItem{Kind: inventory.SysService, Label: "Données du service « " + e.Name() + " »",
-			Paths: []string{s.abs(rel)}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview})
+		s.addWith(inventory.SystemItem{Kind: inventory.SysService, Label: "Données du service « " + e.Name() + " »",
+			Paths: []string{s.abs(rel)}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview}, include)
 	}
 }
 
@@ -524,7 +610,10 @@ func (s *scanner) homeExtras(users []inventory.User) {
 // ScanSystem examine tout ce qui se trouve hors des dossiers personnels.
 // mountsFile vaut /proc/self/mounts sur la machine courante, "" pour un
 // système monté ailleurs (--root). Lecture seule.
-func ScanSystem(root, mountsFile string, users []inventory.User) ([]inventory.SystemItem, []inventory.Disk) {
+//
+// Renvoie aussi les jeux de données à copier (genres pris en charge par
+// cette version, voir Copyable).
+func ScanSystem(root, mountsFile string, users []inventory.User) ([]inventory.SystemItem, []inventory.Disk, []inventory.DataSet) {
 	if root == "" {
 		root = "/"
 	}
@@ -540,9 +629,9 @@ func ScanSystem(root, mountsFile string, users []inventory.User) ([]inventory.Sy
 	s.perChild("opt", inventory.SysOpt, "Logiciel installé à la main : /opt/")
 	s.perChild("srv", inventory.SysSrv, "Données de service : /srv/")
 	if !s.claimed["usr/local"] {
-		u := s.measure("usr/local", s.unownedSkip("usr/local"))
-		s.add(inventory.SystemItem{Kind: inventory.SysLocal, Label: "Programmes et fichiers ajoutés (/usr/local)",
-			Paths: []string{"/usr/local"}, Files: u.files, Bytes: u.bytes, Used: u.used})
+		u, include := s.measureUnowned("usr/local")
+		s.addWith(inventory.SystemItem{Kind: inventory.SysLocal, Label: "Programmes et fichiers ajoutés (/usr/local)",
+			Paths: []string{"/usr/local"}, Files: u.files, Bytes: u.bytes, Used: u.used}, include)
 	}
 	s.varLib()
 	s.custom(mounts)
@@ -551,8 +640,5 @@ func ScanSystem(root, mountsFile string, users []inventory.User) ([]inventory.Sy
 		s.add(inventory.SystemItem{Kind: inventory.SysRoot, Label: "Dossier de l'administrateur (/root)",
 			Paths: []string{"/root"}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview})
 	}
-	for i := range s.items {
-		s.items[i].ID = "s" + strconv.Itoa(i+1)
-	}
-	return s.items, disks
+	return s.items, disks, s.datasets
 }

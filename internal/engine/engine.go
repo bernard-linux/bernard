@@ -66,6 +66,16 @@ type Receiver struct {
 	SyncEvery  int64
 	OnProgress func(Progress)
 
+	// OwnerFor, s'il est fixé, donne le propriétaire de chaque élément
+	// (données hors dossiers personnels : mysql, www-data, root…) à la place
+	// du propriétaire unique passé à CopyDataSetAs.
+	OwnerFor func(source.Entry) *transfer.Owner
+	// Replace, s'il est fixé, est appelé avant d'écrire un fichier ou un lien
+	// là où un élément existe déjà : il le met de côté (pour l'annulation),
+	// au lieu que la copie reçoive un nom de conflit. Sert pour /etc, /opt…,
+	// où le fichier doit prendre la place de celui de la cible.
+	Replace func(dst string) error
+
 	bytes    int64
 	curIndex int
 	curTotal int
@@ -134,7 +144,13 @@ func (r *Receiver) CopyDataSetAs(ctx context.Context, ds inventory.DataSet, dstR
 	}
 
 	var entries []source.Entry
+	// La cible peut restreindre encore la liste (ex. fichiers de /etc
+	// propres à la machine, refusés même si l'ancien ordinateur les envoie).
+	only := source.NewIncluder(ds.Include)
 	err := r.Src.List(ctx, ds.ID, func(e source.Entry) error {
+		if e.Kind == source.KindDir && !only.Dir(e.Rel) || e.Kind != source.KindDir && e.Kind != source.KindUnreadable && !only.File(e.Rel) {
+			return nil
+		}
 		if e.Kind == source.KindUnreadable {
 			rep.Errors = append(rep.Errors, transfer.FileError{Path: e.Rel, Err: e.Link})
 			return nil
@@ -245,10 +261,29 @@ func (r *Receiver) prefetch(pf Prefetcher, ds inventory.DataSet, entries []sourc
 	return nil
 }
 
+func (r *Receiver) ownerOf(e source.Entry, def *transfer.Owner) *transfer.Owner {
+	if r.OwnerFor != nil {
+		return r.OwnerFor(e)
+	}
+	return def
+}
+
+// makeRoom met de côté un élément existant à la place de dst (mode Replace).
+func (r *Receiver) makeRoom(dst string) error {
+	if r.Replace == nil {
+		return nil
+	}
+	fi, err := os.Lstat(dst)
+	if err != nil || fi.IsDir() {
+		return nil
+	}
+	return r.Replace(dst)
+}
+
 // handle traite un élément de la liste.
 func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.Entry, i, total int, key, dst, dstRoot string, owner *transfer.Owner, rep *transfer.TreeReport, fail func(string, error) error) error {
 	{
-		if owner != nil {
+		if owner != nil || r.OwnerFor != nil {
 			if err := transfer.SafeParents(dstRoot, dst); err != nil {
 				return fail(e.Rel, err)
 			}
@@ -266,7 +301,7 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 			// lors d'une annulation.
 			created, err := transfer.EnsureDir(dst, e.Mode.Perm())
 			if err == nil && created {
-				err = owner.Apply(dst)
+				err = r.ownerOf(e, owner).Apply(dst)
 			}
 			if err != nil {
 				return fail(e.Rel, err)
@@ -277,9 +312,14 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 				}
 			}
 		case source.KindSymlink:
+			if l, err := os.Readlink(dst); err != nil || l != e.Link {
+				if err := r.makeRoom(dst); err != nil {
+					return fail(e.Rel, err)
+				}
+			}
 			res, err := transfer.PlaceSymlink(e.Link, dst)
 			if err == nil && res.Status != transfer.StatusAlreadyPresent {
-				err = owner.Apply(res.Dst)
+				err = r.ownerOf(e, owner).Apply(res.Dst)
 			}
 			if err != nil {
 				return fail(e.Rel, err)
@@ -289,6 +329,9 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 			}
 			tally(rep, res)
 		case source.KindFile:
+			if err := r.makeRoom(dst); err != nil {
+				return fail(e.Rel, err)
+			}
 			if r.small(key, e) {
 				if err := r.receiveSmall(ctx, ds.ID, e, dst, key); err != nil {
 					return fail(e.Rel, err)
@@ -299,7 +342,7 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 			if err := r.flush(ctx, ds.ID, dstRoot, owner, rep, fail, total); err != nil {
 				return err
 			}
-			res, err := r.receiveFile(ctx, ds.ID, e, dst, key, owner)
+			res, err := r.receiveFile(ctx, ds.ID, e, dst, key, r.ownerOf(e, owner))
 			if err != nil {
 				return fail(e.Rel, err)
 			}
@@ -349,7 +392,7 @@ func (r *Receiver) receiveSmall(ctx context.Context, ds string, e source.Entry, 
 		return err
 	}
 	info := st.Info()
-	info.Rel = e.Rel
+	info.Rel, info.User, info.Group = e.Rel, e.User, e.Group
 	if len(r.batch) == 0 {
 		r.batchSince = time.Now()
 	}
@@ -381,13 +424,13 @@ func (r *Receiver) flush(ctx context.Context, dsID, dstRoot string, owner *trans
 	for _, p := range batch {
 		res, err := transfer.CommitPartNoSync(p.part, p.dst, p.hash, p.e.Size, p.e.Mode, p.e.MTime)
 		if err == nil && res.Status != transfer.StatusAlreadyPresent {
-			err = owner.Apply(res.Dst)
+			err = r.ownerOf(p.e, owner).Apply(res.Dst)
 		}
 		if errors.Is(err, transfer.ErrVerifyFailed) {
 			// Contenu écrit différent de la source : fichier redemandé une
 			// fois, par le chemin classique (synchronisé, vérifié).
 			os.Remove(p.part)
-			res, err = r.receiveFile(ctx, dsID, p.e, p.dst, p.key, owner)
+			res, err = r.receiveFile(ctx, dsID, p.e, p.dst, p.key, r.ownerOf(p.e, owner))
 			if err == nil {
 				tally(rep, res)
 				continue
@@ -529,7 +572,7 @@ func (r *Receiver) receiveOnce(ctx context.Context, ds, rel, dst, key, part stri
 		}
 		n, rerr := st.Read(buf)
 		if n > 0 {
-			if _, werr := f.Write(buf[:n]); werr != nil {
+			if werr := transfer.WriteSparse(f, buf[:n]); werr != nil {
 				st.Finish() // garder le protocole synchronisé
 				return transfer.FileResult{}, werr
 			}
@@ -561,6 +604,10 @@ func (r *Receiver) receiveOnce(ctx context.Context, ds, rel, dst, key, part stri
 	}
 	hash, err := st.Finish()
 	if err != nil {
+		return transfer.FileResult{}, err
+	}
+	// Un trou final (fichier creux) n'a rien écrit : la taille est fixée ici.
+	if err := f.Truncate(written); err != nil {
 		return transfer.FileResult{}, err
 	}
 	if err := f.Sync(); err != nil {

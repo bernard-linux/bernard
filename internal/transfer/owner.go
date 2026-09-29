@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,12 @@ import (
 // (UID et GID du compte de destination).
 type Owner struct {
 	UID, GID int
+	// Mode, s'il porte des bits spéciaux (setuid, setgid, sticky), est
+	// réappliqué après le changement de propriétaire, qui les efface.
+	Mode fs.FileMode
 }
+
+const specialBits = fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
 
 // Apply attribue path à son propriétaire, sans suivre de lien symbolique.
 // Sans propriétaire (mode non administrateur), ne fait rien.
@@ -19,7 +25,15 @@ func (o *Owner) Apply(path string) error {
 	if o == nil {
 		return nil
 	}
-	return os.Lchown(path, o.UID, o.GID)
+	if err := os.Lchown(path, o.UID, o.GID); err != nil {
+		return err
+	}
+	if o.Mode&specialBits != 0 {
+		if fi, err := os.Lstat(path); err == nil && fi.Mode()&fs.ModeSymlink == 0 {
+			return os.Chmod(path, o.Mode&(fs.ModePerm|specialBits))
+		}
+	}
+	return nil
 }
 
 // SafeParents vérifie que chaque dossier entre root (inclus) et le parent de

@@ -53,6 +53,10 @@ const (
 	// celui de l'ancien ordinateur (hors dossiers personnels). Name = chemin,
 	// Dst = emplacement de la version mise de côté.
 	SysReplaced = "replaced"
+	// SysRepoAdded, SysKeyAdded : fichier de dépôt ou clé ajouté (Name =
+	// chemin), retiré par l'annulation.
+	SysRepoAdded = "repoAdded"
+	SysKeyAdded  = "keyAdded"
 )
 
 // Record est une ligne du journal.

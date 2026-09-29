@@ -1,5 +1,26 @@
 # Historique des versions
 
+## 0.5.1 — 29 septembre 2026
+
+**Dépôts de logiciels ajoutés à la main** (Brave, Chrome, VS Code, Docker,
+PPA…). Jusqu'ici, les logiciels installés depuis ces dépôts étaient classés
+« introuvables » sur le nouvel ordinateur.
+
+- L'ancien ordinateur envoie ses dépôts (`/etc/apt/sources.list.d`) avec
+  leurs clés de signature, et, pour chaque logiciel, le dépôt d'où vient la
+  version installée.
+- Le nouvel ordinateur ajoute seulement les dépôts qu'il ne connaît pas
+  (les dépôts officiels de Zorin, Ubuntu ou Mint déjà présents ne sont pas
+  touchés), puis installe les logiciels qui en viennent. L'écran de choix
+  les montre (« Dépôt de logiciels … ») ; chaque logiciel concerné porte le
+  nom de son dépôt.
+- Le nom de code de la version est adapté (`jammy` → `noble`) pour les PPA.
+- Un dépôt qui ne répond pas depuis le nouvel ordinateur (version du système
+  non prise en charge, dépôt fermé) est retiré aussitôt, avec sa clé, et
+  signalé au bilan : aucune source cassée n'est laissée derrière.
+- Aucune clé ni aucun fichier existant n'est remplacé ; « Annuler la
+  migration » retire ce que Bernard a ajouté.
+
 ## 0.5.0 — 29 septembre 2026
 
 **Copie des données hors des dossiers personnels.** Les éléments trouvés par

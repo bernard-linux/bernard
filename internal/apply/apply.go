@@ -136,11 +136,10 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 		}
 	}
 
-	if len(aptPkgs) > 0 || needFlatpak {
+	added := a.addRepos(p, inv, rep)
+	if len(aptPkgs) > 0 || needFlatpak || len(added) > 0 {
 		a.log("Mise à jour de la liste des paquets…")
-		if err := a.Sys.AptUpdate(ctx); err != nil {
-			a.log("  attention : %v", err)
-		}
+		a.aptUpdateChecked(ctx, added, rep)
 	}
 	if len(aptPkgs) > 0 {
 		a.log("Installation de %d applications depuis les dépôts…", len(aptPkgs))
@@ -478,6 +477,10 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 	for i := len(st.Sys) - 1; i >= 0; i-- {
 		r := st.Sys[i]
 		switch r.Op {
+		case journal.SysRepoAdded, journal.SysKeyAdded:
+			if err := removeAdded(r.Name); err != nil {
+				fail(r.Name, err)
+			}
 		case journal.SysAutoLoginOff:
 			if err := settings.RestoreFile(r.Name, r.Dst); err != nil {
 				fail("ouverture automatique de session", err)

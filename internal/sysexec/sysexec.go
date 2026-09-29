@@ -48,6 +48,9 @@ type Cmd struct {
 	Args  []string
 	Stdin string
 	Env   []string
+	// Combined : la sortie renvoyée mêle sortie standard et erreurs, dans
+	// l'ordre (utile pour analyser les messages d'apt).
+	Combined bool
 }
 
 // Executor exécute une Cmd ; remplaçable dans les tests.
@@ -63,6 +66,13 @@ func Run(ctx context.Context, c Cmd) (string, error) {
 	cmd.Env = append(append(cmd.Environ(), "LC_ALL=C"), c.Env...)
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
+	}
+	if c.Combined {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return string(out), &CmdError{Cmd: c.Name, Err: err}
+		}
+		return string(out), nil
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

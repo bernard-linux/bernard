@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/hardware"
 	"github.com/bernard-linux/bernard/internal/pkgmgr"
 	"github.com/bernard-linux/bernard/internal/settings"
@@ -72,6 +73,7 @@ func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 	sn := &pkgmgr.Snap{Run: run}
 	t.SnapInstalled, _ = sn.Installed(ctx)
 
+	t.KnownRepos = aptrepo.Known("/")
 	t.Keyboard = hardware.Keyboard("/")
 	t.GPUs = hardware.GPUs("/")
 	if al := settings.DetectAutoLogin("/"); al != nil {

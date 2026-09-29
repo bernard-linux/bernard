@@ -343,6 +343,10 @@ func printPlan(p *plan.Plan, inv *inventory.Inventory, warnings []string) {
 			fmt.Printf("  Retirer %s (absente de l'ancien ordinateur)\n", a.Label)
 		case plan.OpKeyboard:
 			fmt.Printf("  Reprendre la disposition du clavier de l'ancien ordinateur pour %s\n", a.Login)
+		case plan.OpAddRepo:
+			fmt.Printf("  Ajouter le dépôt de logiciels %s\n", a.Label)
+		case plan.OpSystemData:
+			fmt.Printf("  Copier %s (%.1f Go)\n", a.Label, float64(a.Bytes)/1e9)
 		}
 	}
 	var apt, fp, review int
@@ -472,6 +476,8 @@ func runPlan(ctx context.Context, args []string) int {
 		plan.OpSettings: "réglages de comptes", plan.OpAddPrinter: "imprimantes",
 		plan.OpRemove:   "applications absentes de l'ancien ordinateur (retrait proposé)",
 		plan.OpKeyboard: "options de clavier (non cochées)",
+		plan.OpAddRepo:  "dépôts de logiciels à ajouter", plan.OpSystemData: "données hors des dossiers personnels",
+		plan.OpAutoLoginOff: "ouverture de session automatique à couper",
 	}
 	sum := p.Summary()
 	fmt.Printf("Cible : %s %s — %.1f Go libres\n", target.Distro, target.Version, float64(target.FreeBytes)/1e9)

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
@@ -35,13 +36,22 @@ func aptApps(ctx context.Context, run Runner) ([]inventory.App, error) {
 			}
 		}
 	}
+	pkgs := lines(manual)
+	// Dépôt d'origine de chaque paquet, en une seule commande.
+	origins := map[string]string{}
+	if len(pkgs) > 0 {
+		if out, err := run(ctx, "apt-cache", append([]string{"policy"}, pkgs...)...); err == nil {
+			origins = aptrepo.Origins(out)
+		}
+	}
 	var apps []inventory.App
-	for _, pkg := range lines(manual) {
+	for _, pkg := range pkgs {
 		apps = append(apps, inventory.App{
 			SourceID: "apt:" + pkg,
 			Name:     pkg,
 			Version:  versions[pkg],
 			Origin:   inventory.OriginApt,
+			Repo:     origins[pkg],
 		})
 	}
 	return apps, nil

@@ -3,6 +3,7 @@ package plan
 import (
 	"testing"
 
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
 
@@ -139,6 +140,37 @@ func TestRemovalsGuards(t *testing.T) {
 	for _, a := range p.Actions {
 		if a.Op == OpKeyboard {
 			t.Error("même clavier : pas d'option")
+		}
+	}
+}
+
+func TestRepoMakesAppInstallable(t *testing.T) {
+	inv, tg := zorinPair()
+	inv.Apps = append(inv.Apps, inventory.App{ID: "a9", SourceID: "apt:brave-browser", Name: "brave-browser",
+		Origin: inventory.OriginApt, Repo: "brave-browser-apt-release.s3.brave.com"})
+	inv.AptSources = []aptrepo.Source{{File: "brave-browser-release.list", URIs: []string{"brave-browser-apt-release.s3.brave.com"}}}
+	tg.KnownRepos = map[string]bool{}
+	p, _ := Build(inv, tg)
+	var repo, app *Action
+	for i, a := range p.Actions {
+		if a.Op == OpAddRepo {
+			repo = &p.Actions[i]
+		}
+		if a.From == "a9" {
+			app = &p.Actions[i]
+		}
+	}
+	if repo == nil || !repo.Selected || repo.Label != "brave-browser-apt-release.s3.brave.com" {
+		t.Fatalf("dépôt : %+v", repo)
+	}
+	if app == nil || app.Op != OpInstall || app.Via != "apt" || !app.Selected {
+		t.Fatalf("Brave : %+v", app)
+	}
+	tg.KnownRepos = map[string]bool{"brave-browser-apt-release.s3.brave.com": true}
+	p, _ = Build(inv, tg)
+	for _, a := range p.Actions {
+		if a.Op == OpAddRepo {
+			t.Error("dépôt déjà connu : pas d'ajout")
 		}
 	}
 }

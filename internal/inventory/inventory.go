@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 )
 
 // Schema identifie la version du format. Le moteur refuse toute autre valeur.
@@ -34,6 +36,8 @@ type Inventory struct {
 	// PackagesRemoved : paquets retirés d'après le journal de dpkg, avec la
 	// date du retrait (AAAA-MM-JJ). Le journal ne remonte qu'à un an environ.
 	PackagesRemoved map[string]string `json:"packagesRemoved,omitempty"`
+	// AptSources : dépôts de logiciels ajoutés (sources.list.d) et leurs clés.
+	AptSources []aptrepo.Source `json:"aptSources,omitempty"`
 	// System : données hors des dossiers personnels (sites, bases, services,
 	// réglages système modifiés, autres disques…). Détectées depuis la 0.4.
 	System []SystemItem `json:"system,omitempty"`
@@ -51,6 +55,9 @@ type Source struct {
 	Desktop  string `json:"desktop,omitempty"` // gnome, cinnamon, kde…
 	Hostname string `json:"hostname"`
 	Snapshot string `json:"snapshot"` // vss, apfs, btrfs, lvm, none
+	// Codename : nom de code Ubuntu (ou Debian) de la version (« noble »),
+	// utilisé pour adapter les PPA à la version de la cible.
+	Codename string `json:"codename,omitempty"`
 	// Keyboard : disposition du clavier du système (« fr », « be »…).
 	Keyboard string `json:"keyboard,omitempty"`
 	// GPUs : fabricants des cartes graphiques (« intel », « nvidia »…).
@@ -84,6 +91,9 @@ type App struct {
 	Name     string `json:"name"`
 	Version  string `json:"version,omitempty"`
 	Origin   string `json:"origin"`
+	// Repo : adresse (normalisée) du dépôt d'où vient la version installée,
+	// quand ce n'est pas celui de la distribution qui la fournit.
+	Repo string `json:"repo,omitempty"`
 	// LastUsed est vide quand la date est inconnue ; l'interface garde alors
 	// l'application cochée par défaut.
 	LastUsed *time.Time `json:"lastUsed,omitempty"`

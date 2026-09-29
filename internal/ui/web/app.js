@@ -466,6 +466,7 @@ const screens = {
     const sets = p.actions.filter(a => a.op === "settings");
     const autologin = p.actions.filter(a => a.op === "autoLoginOff");
     const sysdata = p.actions.filter(a => a.op === "systemData");
+    const repos = p.actions.filter(a => a.op === "addRepo");
     const skipped = apps.filter(a => a.op === "skip");
     const visibleApps = apps.filter(a => a.op !== "skip");
     const removals = p.actions.filter(a => a.op === "remove");
@@ -491,6 +492,9 @@ const screens = {
 
       <h2>Applications</h2>
       ${visibleApps.some(a => a.op === "install") ? `<label class="meta"><input type="checkbox" id="all-apps"> Tout sélectionner</label>` : ""}
+      ${repos.length ? `<ul class="list">${repos.map(a => row(a, `Dépôt de logiciels ${esc(a.label)}`,
+        "Ajouté ici pour réinstaller les logiciels qui en viennent. S'il ne répond pas pour cette version du système, il est retiré aussitôt.",
+        `<span class="tag full">Dépôt</span>`)).join("")}</ul>` : ""}
       <ul class="list" id="apps">${visibleApps.map(a => appRow(a, s)).join("") || `<li><span></span><span class="meta">Aucune application à installer : tout est déjà présent.</span><span></span></li>`}</ul>
       ${skipped.length ? `<button class="link toggle-more" id="more">Afficher les ${skipped.length} éléments déjà présents sur cet ordinateur</button>
         <ul class="list" id="skipped" hidden>${skipped.map(a => `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span>
@@ -737,7 +741,7 @@ function appRow(a, s) {
   }
   const tag = a.fidelity === "substitute"
     ? `<span class="tag substitute">Équivalent Flathub</span>`
-    : `<span class="tag full">${a.via === "flatpak" ? "Flathub" : "Identique"}</span>`;
+    : `<span class="tag full">${a.via === "flatpak" ? "Flathub" : a.suggestion ? esc(a.suggestion) : "Identique"}</span>`;
   return row(a, esc(a.label), used, tag);
 }
 function accountRow(a, s) {

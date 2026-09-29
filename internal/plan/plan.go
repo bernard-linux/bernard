@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/hardware"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/settings"
@@ -32,7 +33,8 @@ const (
 	OpRemove       = "remove"       // retirer une application absente de l'ancien ordinateur
 	OpKeyboard     = "keyboard"     // reprendre la disposition du clavier de l'ancien ordinateur
 	OpAutoLoginOff = "autoLoginOff" // ne plus ouvrir seule la session d'un compte non migré
-	OpSystemData   = "systemData"   // données hors des dossiers personnels (copie : version 0.5)
+	OpSystemData   = "systemData"   // données hors des dossiers personnels
+	OpAddRepo      = "addRepo"      // ajouter un dépôt de logiciels de l'ancien ordinateur
 	OpSkip         = "skip"         // rien à faire (déjà présent, technique…)
 	OpReview       = "review"       // action manuelle proposée à l'utilisateur
 )
@@ -104,6 +106,10 @@ type Target struct {
 	SnapInstalled    map[string]bool   `json:"-"`
 	Keyboard         string            `json:"keyboard,omitempty"`
 	GPUs             []string          `json:"gpus,omitempty"`
+	// Codename : nom de code Ubuntu/Debian de la cible (« noble »).
+	Codename string `json:"codename,omitempty"`
+	// KnownRepos : adresses des dépôts déjà configurés sur la cible.
+	KnownRepos map[string]bool `json:"-"`
 	// AutoLoginUser : compte dont la session s'ouvre seule au démarrage.
 	AutoLoginUser string `json:"autoLoginUser,omitempty"`
 	// Pour proposer le retrait des applications absentes de la source.
@@ -171,11 +177,37 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 		add(Action{Op: OpCreateUser, From: u.ID, Login: u.Login, Label: u.Login, Password: pw, Selected: true})
 	}
 
-	// 2. Applications.
+	// 2. Dépôts de logiciels ajoutés sur l'ancien ordinateur et inconnus ici.
+	newRepos := map[string]string{} // adresse → hôte
+	if inv.Source.OS == "linux" {
+		for _, src := range inv.AptSources {
+			missing := false
+			for _, u := range src.URIs {
+				if !t.KnownRepos[u] {
+					missing = true
+				}
+			}
+			if !missing {
+				continue
+			}
+			host := aptrepo.Host(src.URIs[0])
+			add(Action{Op: OpAddRepo, Label: host, Package: src.File, Fidelity: FidelityFull, Selected: true})
+			for _, u := range src.URIs {
+				newRepos[u] = host
+			}
+		}
+	}
+
+	// 2 bis. Applications.
 	var installs []Action
 	needFlatpak := false
 	for _, app := range inv.Apps {
 		a := appAction(app, t)
+		// Introuvable ici, mais son dépôt sera ajouté : installable.
+		if a.Op == OpReview && a.Reason == ReasonNotInRepos && newRepos[app.Repo] != "" {
+			a.Op, a.Via, a.Package, a.Fidelity, a.Selected, a.Reason = OpInstall, "apt", app.Name, FidelityFull, true, ""
+			a.Suggestion = "dépôt " + newRepos[app.Repo]
+		}
 		if a.Op == OpInstall && a.Via == "flatpak" {
 			needFlatpak = true
 		}

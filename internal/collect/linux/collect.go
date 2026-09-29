@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
 
@@ -87,6 +88,7 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 		inv.System, inv.Disks, sys = ScanSystem(opt.Root, mountsFile, inv.Users)
 		inv.DataSets = append(inv.DataSets, sys...)
 	}
+	inv.AptSources = aptrepo.Read(opt.Root)
 	inv.Packages = allPackages(opt.Root)
 	inv.PackagesRemoved = removedPackages(opt.Root, inv.Packages)
 

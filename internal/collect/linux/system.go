@@ -50,6 +50,10 @@ func readSource(root string) inventory.Source {
 		kv := parseOSRelease(f)
 		src.Distro = kv["ID"]
 		src.Version = kv["VERSION_ID"]
+		src.Codename = kv["UBUNTU_CODENAME"]
+		if src.Codename == "" {
+			src.Codename = kv["VERSION_CODENAME"]
+		}
 	}
 	src.Hostname, _ = os.Hostname()
 	src.Desktop = settings.DetectDesktop(root)

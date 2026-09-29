@@ -32,6 +32,7 @@ const (
 	OpRemove       = "remove"       // retirer une application absente de l'ancien ordinateur
 	OpKeyboard     = "keyboard"     // reprendre la disposition du clavier de l'ancien ordinateur
 	OpAutoLoginOff = "autoLoginOff" // ne plus ouvrir seule la session d'un compte non migré
+	OpSystemData   = "systemData"   // données hors des dossiers personnels (copie : version 0.5)
 	OpSkip         = "skip"         // rien à faire (déjà présent, technique…)
 	OpReview       = "review"       // action manuelle proposée à l'utilisateur
 )
@@ -76,8 +77,12 @@ type Action struct {
 	Fidelity   string `json:"fidelity,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Suggestion string `json:"suggestion,omitempty"`
-	// Also : autres paquets que retirerait un retrait (OpRemove).
+	// Also : autres paquets que retirerait un retrait (OpRemove), ou
+	// fichiers concernés (OpSystemData, liste courte).
 	Also []string `json:"also,omitempty"`
+	// Used : place réellement occupée (OpSystemData), plus petite que Bytes
+	// pour les fichiers creux.
+	Used int64 `json:"used,omitempty"`
 	// Date : date du retrait sur l'ancien ordinateur (OpRemove), ou
 	// disposition du clavier de l'ancien ordinateur (OpKeyboard).
 	Date     string `json:"date,omitempty"`
@@ -228,6 +233,13 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 		if !migrated {
 			add(Action{Op: OpAutoLoginOff, Login: u, Label: u, Fidelity: FidelityFull, Selected: true})
 		}
+	}
+
+	// 4 ter. Données hors des dossiers personnels : détectées et montrées ;
+	// leur copie arrive avec la version 0.5.
+	for _, it := range inv.System {
+		add(Action{Op: OpSystemData, From: it.ID, Label: it.Label, Files: it.Files, Bytes: it.Bytes, Used: it.Used,
+			Reason: it.Kind, Suggestion: it.Advice, Also: it.Detail, Fidelity: FidelityNone, Selected: false})
 	}
 
 	// 5. Réseau et imprimantes.

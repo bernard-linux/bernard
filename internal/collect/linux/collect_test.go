@@ -234,3 +234,92 @@ func TestRemovedPackages(t *testing.T) {
 		t.Fatalf("retirés = %v", rm)
 	}
 }
+
+func TestScanSystem(t *testing.T) {
+	root := t.TempDir()
+	w := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(content), 0o644)
+	}
+	// Base dpkg : /etc/app.conf est un fichier de configuration d'origine
+	// « abc » ; /opt/paquet/bin est installé par un paquet.
+	w("var/lib/dpkg/info/app.list", "/etc/app.conf\n/etc/intact.conf\n/opt/paquet\n/opt/paquet/bin\n/usr/local/share\n")
+	w("var/lib/dpkg/status", "Package: app\nStatus: install ok installed\nConffiles:\n /etc/app.conf 900150983cd24fb0d6963f7d28e17f72\n /etc/intact.conf 900150983cd24fb0d6963f7d28e17f72\n\n")
+	w("etc/app.conf", "modifié")      // conffile modifié
+	w("etc/intact.conf", "abc")       // conffile d'origine (md5 de « abc »)
+	w("etc/ajout.conf", "x")          // ajouté à la main
+	w("etc/machine-id", "1234")       // propre à la machine
+	w("etc/fstab", "UUID=…")          // propre à la machine
+	w("opt/paquet/bin", "binaire")    // installé par un paquet
+	w("opt/monlogiciel/app", "12345") // installé à la main
+	w("var/www/html/index.php", "<?php")
+	w("var/lib/mysql/ibdata1", "donnees")
+	w("var/lib/apt/lists/x", "cache")
+	w("data/projets/plan.odt", "plan")
+	w("timeshift/snapshots/1/x", "s")
+	w("home/partage/film.mkv", "film")
+	w("home/arnaud/Documents/a.txt", "a")
+	w("usr/local/bin/outil", "#!/bin/sh")
+
+	items, _ := ScanSystem(root, "", []inventory.User{{ID: "u1", Login: "arnaud", Home: "/home/arnaud"}})
+	byLabel := map[string]inventory.SystemItem{}
+	for _, it := range items {
+		byLabel[it.Kind+"|"+it.Paths[0]] = it
+	}
+	etc := byLabel["etc|/etc"]
+	if got := strings.Join(etc.Detail, ","); got != "/etc/ajout.conf,/etc/app.conf" {
+		t.Errorf("/etc : %q", got)
+	}
+	if it, ok := byLabel["opt|/opt/monlogiciel"]; !ok || it.Files != 1 {
+		t.Errorf("/opt/monlogiciel manquant : %v", byLabel)
+	}
+	if _, ok := byLabel["opt|/opt/paquet"]; ok {
+		t.Error("/opt/paquet appartient à un paquet : il sera réinstallé, pas copié")
+	}
+	if _, ok := byLabel["web|/var/www"]; !ok {
+		t.Error("sites web non reconnus")
+	}
+	if it := byLabel["database|/var/lib/mysql"]; it.Service != "mysql" {
+		t.Errorf("MySQL : %+v", it)
+	}
+	if _, ok := byLabel["custom|/data"]; !ok {
+		t.Error("/data manquant")
+	}
+	if it := byLabel["backup|/timeshift"]; it.Advice != inventory.AdviceSkip {
+		t.Errorf("Timeshift : %+v", it)
+	}
+	if _, ok := byLabel["custom|/home/partage"]; !ok {
+		t.Error("/home/partage (sans compte) manquant")
+	}
+	if _, ok := byLabel["custom|/home/arnaud"]; ok {
+		t.Error("le dossier personnel d'arnaud est déjà migré à part")
+	}
+	if it := byLabel["local|/usr/local"]; it.Files != 1 {
+		t.Errorf("/usr/local : %+v", it)
+	}
+	for k := range byLabel {
+		if strings.Contains(k, "var/lib/apt") {
+			t.Error("les données d'apt ne doivent pas apparaître")
+		}
+	}
+}
+
+func TestClassifyDisk(t *testing.T) {
+	d := t.TempDir()
+	os.MkdirAll(filepath.Join(d, "timeshift"), 0o755)
+	if k, a := classifyDisk(d); k != inventory.SysBackup || a != inventory.AdviceSkip {
+		t.Errorf("sauvegarde : %s %s", k, a)
+	}
+	d = t.TempDir()
+	os.MkdirAll(filepath.Join(d, "Documents"), 0o755)
+	os.MkdirAll(filepath.Join(d, "Images"), 0o755)
+	if k, _ := classifyDisk(d); k != inventory.SysHomeElse {
+		t.Errorf("dossier personnel déplacé : %s", k)
+	}
+	d = t.TempDir()
+	os.MkdirAll(filepath.Join(d, "SteamLibrary"), 0o755)
+	if k, _ := classifyDisk(d); k != inventory.SysSteam {
+		t.Errorf("Steam : %s", k)
+	}
+}

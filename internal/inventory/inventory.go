@@ -33,6 +33,11 @@ type Inventory struct {
 	// PackagesRemoved : paquets retirés d'après le journal de dpkg, avec la
 	// date du retrait (AAAA-MM-JJ). Le journal ne remonte qu'à un an environ.
 	PackagesRemoved map[string]string `json:"packagesRemoved,omitempty"`
+	// System : données hors des dossiers personnels (sites, bases, services,
+	// réglages système modifiés, autres disques…). Détectées depuis la 0.4.
+	System []SystemItem `json:"system,omitempty"`
+	// Disks : disques et partitions montés sur la source.
+	Disks []Disk `json:"disks,omitempty"`
 	// Warnings liste ce que l'agent n'a pas pu inventorier, pour le rapport.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -92,6 +97,63 @@ type DataSet struct {
 	Files     int64    `json:"files"`
 	SizeBytes int64    `json:"sizeBytes"`
 	Excluded  []string `json:"excluded,omitempty"` // chemins relatifs exclus par défaut
+}
+
+// Genres de données hors des dossiers personnels.
+const (
+	SysWeb       = "web"       // sites web (/var/www…)
+	SysDatabase  = "database"  // bases MySQL, MariaDB, PostgreSQL
+	SysContainer = "container" // Docker, Podman, LXD
+	SysVM        = "vm"        // disques de machines virtuelles
+	SysAppServer = "appserver" // serveur d'application (FileMaker…)
+	SysOpt       = "opt"       // logiciel installé à la main dans /opt
+	SysSrv       = "srv"       // données de service dans /srv
+	SysLocal     = "local"     // /usr/local
+	SysEtc       = "etc"       // réglages système modifiés ou ajoutés
+	SysRoot      = "root"      // dossier de l'administrateur (/root)
+	SysService   = "service"   // données d'un autre service (/var/lib/…)
+	SysCustom    = "custom"    // dossier ajouté à la racine (/data…)
+	SysDisk      = "disk"      // données sur un autre disque ou partition
+	SysHomeElse  = "homeelse"  // dossier personnel placé sur un autre disque
+	SysBackup    = "backup"    // sauvegardes (Timeshift, Déjà Dup…)
+	SysSteam     = "steam"     // bibliothèque Steam hors du dossier personnel
+)
+
+// Conseils associés à un élément.
+const (
+	AdviceCopy   = "copy"   // à copier
+	AdviceSkip   = "skip"   // copie déconseillée (sauvegarde, données régénérables)
+	AdviceAttach = "attach" // disque à rattacher tel quel s'il est déplacé
+	AdviceReview = "review" // à examiner par l'utilisateur
+)
+
+// SystemItem est un ensemble de données hors des dossiers personnels.
+type SystemItem struct {
+	ID    string   `json:"id"`
+	Kind  string   `json:"kind"`
+	Label string   `json:"label"`
+	Paths []string `json:"paths"` // chemins absolus sur la source
+	Files int64    `json:"files"`
+	Bytes int64    `json:"bytes"` // taille apparente
+	// Used est la place réellement occupée : plus petite que Bytes pour les
+	// fichiers creux (disques virtuels), qu'il faudra copier creux.
+	Used int64 `json:"used"`
+	// Service : service à arrêter pendant la copie (mysql, docker…).
+	Service string `json:"service,omitempty"`
+	Advice  string `json:"advice"`
+	// Detail : liste des fichiers concernés quand elle est courte (/etc).
+	Detail []string `json:"detail,omitempty"`
+}
+
+// Disk est un système de fichiers monté sur la source.
+type Disk struct {
+	Device string `json:"device"`
+	Mount  string `json:"mount"`
+	FSType string `json:"fstype"`
+	Label  string `json:"label,omitempty"`
+	Size   int64  `json:"size"`
+	Used   int64  `json:"used"`
+	Role   string `json:"role"` // system, home, boot, data
 }
 
 // Network regroupe ce qui touche au réseau et aux périphériques.

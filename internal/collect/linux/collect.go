@@ -78,6 +78,13 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	for i := range inv.Apps {
 		inv.Apps[i].ID = "a" + strconv.Itoa(i+1)
 	}
+	if !opt.SkipData {
+		mountsFile := ""
+		if opt.Root == "/" {
+			mountsFile = "/proc/self/mounts"
+		}
+		inv.System, inv.Disks = ScanSystem(opt.Root, mountsFile, inv.Users)
+	}
 	inv.Packages = allPackages(opt.Root)
 	inv.PackagesRemoved = removedPackages(opt.Root, inv.Packages)
 

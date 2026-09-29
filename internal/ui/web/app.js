@@ -465,6 +465,7 @@ const screens = {
     const net = p.actions.filter(a => a.op === "importWifi" || a.op === "addPrinter");
     const sets = p.actions.filter(a => a.op === "settings");
     const autologin = p.actions.filter(a => a.op === "autoLoginOff");
+    const sysdata = p.actions.filter(a => a.op === "systemData");
     const skipped = apps.filter(a => a.op === "skip");
     const visibleApps = apps.filter(a => a.op !== "skip");
     const removals = p.actions.filter(a => a.op === "remove");
@@ -495,6 +496,8 @@ const screens = {
         <ul class="list" id="skipped" hidden>${skipped.map(a => `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span>
         <span class="meta"> ${skipWhy(a)}</span></span><span></span></li>`).join("")}</ul>` : ""}
       ${removals.length ? `<p class="meta" id="rm-summary"></p>` : ""}
+
+      ${sysdata.length ? systemDataSection(sysdata) : ""}
 
       ${net.length ? `<h2>Réseau et imprimantes</h2><ul class="list">${net.map(a => a.op === "importWifi"
         ? row(a, `Wi-Fi « ${esc(a.label)} »`, "Le mot de passe du réseau est repris.")
@@ -600,6 +603,7 @@ const screens = {
         ${failed.map(([n, why]) => `<li class="bad">${esc(n)} : échec (${esc(why)})</li>`).join("")}
         ${errors.map(e => `<li class="bad">${esc(e.path)} : ${esc(e.error)}</li>`).join("")}
       </ul>
+      ${stayed(s)}
       ${setSkipped.length ? `<h2>À faire à la main</h2><ul class="list">${setSkipped.map(([n, why]) =>
         `<li><span></span><span><span class="name">${esc(n)}</span><br><span class="meta">${esc(why.replace(/^non appliqué : /, ""))}</span></span><span></span></li>`).join("")}</ul>` : ""}
       ${renamed.length ? `<h2>Fichiers renommés</h2><p>Un fichier du même nom existait déjà ici ; il a été conservé et la copie a reçu un nouveau nom.</p>
@@ -888,6 +892,37 @@ function updateSend(s) {
   main.querySelector("#log").textContent = (s.log || []).join("\n");
 }
 
+const SYSKIND = {
+  web: "Sites web", database: "Base de données", container: "Conteneurs", vm: "Machines virtuelles",
+  appserver: "Serveur", opt: "Logiciel", srv: "Service", local: "Programmes", etc: "Réglages système",
+  root: "Administrateur", service: "Service", custom: "Dossier", disk: "Disque", homeelse: "Dossier personnel",
+  backup: "Sauvegarde", steam: "Jeux",
+};
+const ADVICE = {
+  copy: "À reprendre.",
+  skip: "Sauvegarde : inutile de la copier si les données qu'elle protège sont déjà migrées.",
+  attach: "Autre disque : à brancher tel quel dans le nouvel ordinateur, ou à copier.",
+  review: "À examiner : Bernard ne sait pas si c'est utile.",
+};
+function sysMeta(a) {
+  const size = a.bytes ? bytes(a.bytes) : "";
+  const files = a.files ? plural(a.files, "fichier", "fichiers") : "";
+  const sparse = a.used && a.bytes && a.used < a.bytes * 0.8 ? ` (${bytes(a.used)} réellement occupés : fichiers creux)` : "";
+  return [size + sparse, files].filter(Boolean).join(", ") + ". " + (ADVICE[a.suggestion] || "");
+}
+function systemDataSection(items) {
+  const total = items.filter(a => a.suggestion !== "skip").reduce((n, a) => n + (a.used || a.bytes || 0), 0);
+  return `<h2>Hors des dossiers personnels</h2>
+    <p class="meta">Bernard a examiné tout le disque de l'ancien ordinateur. Voici ce qui n'appartient ni au système
+    ni à vos dossiers personnels${total ? ` (environ ${bytes(total)} hors sauvegardes)` : ""}.
+    <strong>La copie de ces éléments arrive dans la prochaine version de Bernard</strong> : pour l'instant, ils restent
+    sur l'ancien ordinateur et figurent au bilan.</p>
+    <ul class="list">${items.map(a => `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span><br>
+      <span class="meta">${sysMeta(a)}</span>
+      ${a.also?.length ? `<details><summary>${plural(a.also.length, "fichier", "fichiers")}</summary><pre class="log">${esc(a.also.join("\n"))}</pre></details>` : ""}
+      </span><span class="tag none">${esc(SYSKIND[a.reason] || "Données")}</span></li>`).join("")}</ul>`;
+}
+
 function extraAccountsSection(s) {
   const accs = s.extraAccounts || [];
   if (!accs.length) return "";
@@ -902,6 +937,15 @@ function extraAccountsSection(s) {
       ${a.scheduled ? "<strong>Sera supprimé au prochain démarrage.</strong>" : ""}</span></span>
       ${a.scheduled ? `<button class="quiet" data-rm="${esc(a.login)}" data-on="0">Garder ce compte</button>`
         : `<button class="danger" data-rm="${esc(a.login)}" data-on="1">Supprimer au prochain démarrage</button>`}</li>`).join("")}</ul>`;
+}
+
+function stayed(s) {
+  const items = (s.plan?.actions || []).filter(a => a.op === "systemData");
+  if (!items.length || s.undo) return "";
+  return `<h2>Resté sur l'ancien ordinateur</h2>
+    <p>Ces éléments hors des dossiers personnels n'ont pas encore été copiés. Gardez l'ancien ordinateur tant qu'ils ne sont pas repris.</p>
+    <ul class="list">${items.map(a => `<li><span></span><span><span class="name">${esc(a.label)}</span><br>
+      <span class="meta">${sysMeta(a)}</span></span><span></span></li>`).join("")}</ul>`;
 }
 
 function renderUndo(s) {

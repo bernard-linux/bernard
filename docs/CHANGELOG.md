@@ -1,5 +1,33 @@
 # Historique des versions
 
+## 0.4.0 — 29 septembre 2026
+
+**Examen de tout le disque de l'ancien ordinateur.** Bernard repère désormais
+ce qui n'appartient ni au système ni aux dossiers personnels, et le montre sur
+l'écran de choix, avec la taille de chaque élément et un conseil :
+
+- réglages système modifiés ou ajoutés (`/etc`, liste des fichiers) ;
+- logiciels installés à la main (`/opt`, `/usr/local`), données de service
+  (`/srv`) ;
+- sites web (`/var/www`), bases MySQL/MariaDB, PostgreSQL, MongoDB, Redis,
+  Docker, Podman, machines virtuelles libvirt, serveur FileMaker, autres
+  services ;
+- dossiers ajoutés à la racine (`/data`…), dossiers de `/home` sans compte,
+  dossier de l'administrateur ;
+- autres disques : sauvegarde (copie déconseillée), bibliothèque de jeux,
+  dossier personnel déplacé, autre disque ; bibliothèques Steam sur un
+  second disque ;
+- place réellement occupée à côté de la taille apparente (fichiers creux des
+  disques virtuels).
+
+Ce qui appartient à un paquet et n'a pas été modifié est réinstallé, jamais
+copié. Ce qui tient à la machine (identité, disques, amorçage, pilotes) est
+écarté. **Ces éléments ne sont pas encore copiés** : ils figurent au bilan,
+sous « Resté sur l'ancien ordinateur ». La copie arrive avec la 0.5.
+Installez la 0.4 sur les deux ordinateurs.
+
+Spécification : `docs/DONNEES-HORS-DOSSIERS.md`.
+
 ## 0.3.3 — 29 septembre 2026
 
 - **Clavier** : sur un compte créé par Bernard, la disposition de l'ancien

@@ -11,6 +11,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/hardware"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/pkgmgr"
 	"github.com/bernard-linux/bernard/internal/settings"
 	"github.com/bernard-linux/bernard/internal/sysexec"
@@ -42,7 +43,7 @@ func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 	if err := syscall.Statfs(t.HomeRoot, &st); err == nil {
 		t.FreeBytes = int64(st.Bavail) * int64(st.Bsize)
 	} else {
-		warnings = append(warnings, "espace libre inconnu : "+err.Error())
+		warnings = append(warnings, i18n.Tf("espace libre inconnu : %v", err))
 	}
 
 	if f, err := os.Open("/etc/passwd"); err == nil {
@@ -59,7 +60,7 @@ func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 	if set, err := apt.Installed(ctx); err == nil {
 		t.AptInstalled = set
 	} else {
-		warnings = append(warnings, "paquets apt installés inconnus : "+err.Error())
+		warnings = append(warnings, i18n.Tf("paquets apt installés inconnus : %v", err))
 	}
 	t.AptAvailable = func(name string) bool {
 		ok, err := apt.Available(ctx, name)
@@ -168,7 +169,7 @@ func detectRemovable(ctx context.Context, run sysexec.Runner, t *Target) {
 }
 
 // desktopName lit le nom affiché d'un fichier .desktop (en français s'il
-// existe) ; faux pour une entrée cachée du menu.
+// existe et que Bernard parle français) ; faux pour une entrée cachée du menu.
 func desktopName(path string) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -203,7 +204,7 @@ func desktopName(path string) (string, bool) {
 			}
 		}
 	}
-	if nameFR != "" {
+	if nameFR != "" && i18n.Lang() == i18n.FR {
 		name = nameFR
 	}
 	return name, name != ""

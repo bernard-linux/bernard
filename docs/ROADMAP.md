@@ -14,7 +14,7 @@
 | 8 | Paquets `.deb`, test de bout en bout réel, matrice d'intégration continue (Ubuntu 22.04/24.04, Debian 12, Mint 21/22), test Flathub réel, banc d'essai en machines virtuelles | Fait, sauf instantanés btrfs/LVM de la source (reportés) |
 
 | 9 | Données hors des dossiers personnels : détection (0.4), copie (0.5), serveurs et bases cohérents (0.6) — voir `DONNEES-HORS-DOSSIERS.md` | Fait (0.4 à 0.6.1) |
-| 10 | Finitions : extensions GNOME et tableau de bord de Zorin, bilan lisible et PDF, date de dernière utilisation, VPN, liens durs (0.7) ; anglais | 0.7 fait, anglais à faire |
+| 10 | Finitions : extensions GNOME et tableau de bord de Zorin, bilan lisible et PDF, date de dernière utilisation, VPN, liens durs (0.7) ; anglais | Fait (0.7 ; anglais en 0.8) |
 | 11 | Validation V1.0 : banc de 16 combinaisons en machines virtuelles, 5 testeurs, dépôt APT du projet | À faire |
 
 ### Points déjà identifiés

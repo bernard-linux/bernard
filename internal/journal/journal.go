@@ -10,10 +10,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Types d'enregistrements.
@@ -179,13 +180,13 @@ func Load(path string) (*State, error) {
 		}
 		var r Record
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
-			pendingErr = fmt.Errorf("journal corrompu : %w", err)
+			pendingErr = i18n.Errorf("journal corrompu : %w", err)
 			continue
 		}
 		switch r.T {
 		case RecBegin:
 			if st.Inventory != "" && r.Inventory != st.Inventory {
-				return nil, errors.New("journal : l'inventaire a changé en cours de migration")
+				return nil, errors.New(i18n.T("journal : l'inventaire a changé en cours de migration"))
 			}
 			st.Inventory = r.Inventory
 		case RecProgress:

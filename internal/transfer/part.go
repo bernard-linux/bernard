@@ -4,12 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // PartPath renvoie le nom du fichier temporaire, stable pour une clé donnée :
@@ -66,7 +67,7 @@ func commitPart(part, dst, expectHash string, size int64, mode fs.FileMode, mtim
 		return res, err
 	}
 	if got != expectHash || n != size {
-		return res, fmt.Errorf("%s : %w", dst, ErrVerifyFailed)
+		return res, i18n.Errorf("%s : %w", dst, ErrVerifyFailed)
 	}
 	if err := os.Chmod(part, mode.Perm()); err != nil {
 		return res, err
@@ -98,7 +99,7 @@ func EnsureDir(dst string, perm fs.FileMode) (bool, error) {
 	case err == nil && fi.IsDir():
 		return false, nil
 	case err == nil:
-		return false, fmt.Errorf("%s existe déjà et n'est pas un dossier", dst)
+		return false, i18n.Errorf("%s existe déjà et n'est pas un dossier", dst)
 	case errors.Is(err, os.ErrNotExist):
 		return true, os.Mkdir(dst, perm|0o700)
 	default:
@@ -128,7 +129,7 @@ func PlaceSymlink(target, dst string) (FileResult, error) {
 			return res, err
 		}
 	}
-	return res, fmt.Errorf("%s : %w", dst, ErrTooManyNames)
+	return res, i18n.Errorf("%s : %w", dst, ErrTooManyNames)
 }
 
 // WhiteoutHash marque dans le journal un fichier « effacé » d'overlay.
@@ -143,7 +144,7 @@ func PlaceWhiteout(dst string) (FileResult, error) {
 			res.Status = StatusAlreadyPresent
 			return res, nil
 		}
-		return res, fmt.Errorf("%s existe déjà", dst)
+		return res, i18n.Errorf("%s existe déjà", dst)
 	}
 	if err := syscall.Mknod(dst, syscall.S_IFCHR|0o600, 0); err != nil {
 		return res, err

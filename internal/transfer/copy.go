@@ -23,14 +23,16 @@ import (
 	"time"
 
 	"github.com/zeebo/blake3"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Erreurs signalées dans le rapport.
 var (
-	ErrNotRegular    = errors.New("pas un fichier ordinaire")
-	ErrVerifyFailed  = errors.New("vérification échouée : le contenu écrit diffère de la source")
-	ErrSourceChanged = errors.New("fichier source modifié pendant la copie")
-	ErrTooManyNames  = errors.New("trop de conflits de noms")
+	ErrNotRegular    = i18n.NewError("pas un fichier ordinaire")
+	ErrVerifyFailed  = i18n.NewError("vérification échouée : le contenu écrit diffère de la source")
+	ErrSourceChanged = i18n.NewError("fichier source modifié pendant la copie")
+	ErrTooManyNames  = i18n.NewError("trop de conflits de noms")
 )
 
 // Status décrit l'issue d'une copie réussie.
@@ -85,7 +87,7 @@ func CopyFile(src, dst string) (FileResult, error) {
 		return res, err
 	}
 	if !info.Mode().IsRegular() {
-		return res, fmt.Errorf("%s : %w", src, ErrNotRegular)
+		return res, i18n.Errorf("%s : %w", src, ErrNotRegular)
 	}
 
 	var tmp, sum string
@@ -112,7 +114,7 @@ func CopyFile(src, dst string) (FileResult, error) {
 	}
 	if written != sum {
 		cleanup()
-		return res, fmt.Errorf("%s : %w", src, ErrVerifyFailed)
+		return res, i18n.Errorf("%s : %w", src, ErrVerifyFailed)
 	}
 	if err := os.Chmod(tmp, info.Mode().Perm()); err != nil {
 		cleanup()
@@ -175,7 +177,7 @@ func writeTemp(src, dir string, before os.FileInfo) (string, string, error) {
 	}
 	if n != before.Size() || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
 		os.Remove(tmp)
-		return "", "", fmt.Errorf("%s : %w", src, ErrSourceChanged)
+		return "", "", i18n.Errorf("%s : %w", src, ErrSourceChanged)
 	}
 	return tmp, "blake3:" + hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -210,7 +212,7 @@ func place(tmp, dst, sum string, size int64) (string, Status, error) {
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("%s : %w", dst, ErrTooManyNames)
+	return "", "", i18n.Errorf("%s : %w", dst, ErrTooManyNames)
 }
 
 // conflictName renvoie dst pour i = 0, sinon « nom (bernard i).ext ».

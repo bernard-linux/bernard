@@ -13,6 +13,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/discovery"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/link"
 	"github.com/bernard-linux/bernard/internal/remote"
@@ -94,18 +95,18 @@ func Serve(ctx context.Context, conn *session.Conn, srv *remote.Server, tr *disc
 }
 
 var linkNames = map[string]string{
-	discovery.LinkThunderbolt: "câble Thunderbolt / USB4",
-	discovery.LinkEthernet:    "câble réseau (RJ45)",
-	discovery.LinkWifi:        "Wi-Fi",
-	discovery.LinkOther:       "réseau",
+	discovery.LinkThunderbolt: i18n.N("câble Thunderbolt / USB4"),
+	discovery.LinkEthernet:    i18n.N("câble réseau (RJ45)"),
+	discovery.LinkWifi:        i18n.N("Wi-Fi"),
+	discovery.LinkOther:       i18n.N("réseau"),
 }
 
 // LinkName nomme le type de liaison en français.
 func LinkName(link string) string {
 	if n, ok := linkNames[link]; ok {
-		return n
+		return i18n.T(n)
 	}
-	return "réseau"
+	return i18n.T("réseau")
 }
 
 // Describe nomme une liaison avec son débit, s'il est connu.

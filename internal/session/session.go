@@ -17,12 +17,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"math/big"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/pake"
 	"github.com/bernard-linux/bernard/internal/wire"
 )
@@ -40,11 +40,49 @@ const (
 
 // Erreurs d'appairage.
 var (
-	ErrCodeExpired = errors.New("code d'appairage expiré : un nouveau code est nécessaire")
-	ErrCodeRevoked = errors.New("trop d'essais incorrects : un nouveau code est nécessaire")
+	ErrCodeExpired = i18n.NewError(msgCodeExpired)
+	ErrCodeRevoked = i18n.NewError(msgCodeRevoked)
 	ErrBadCode     = pake.ErrBadCode
-	ErrNoSession   = errors.New("aucune session à reprendre : un nouvel appairage est nécessaire")
+	ErrNoSession   = i18n.NewError(msgNoSession)
 )
+
+// Textes des erreurs d'appairage, envoyés tels quels (en français) à l'autre
+// ordinateur, qui les traduit dans sa propre langue : les deux ordinateurs
+// peuvent ne pas parler la même.
+var (
+	msgCodeExpired = i18n.N("code d'appairage expiré : un nouveau code est nécessaire")
+	msgCodeRevoked = i18n.N("trop d'essais incorrects : un nouveau code est nécessaire")
+	msgNoSession   = i18n.N("aucune session à reprendre : un nouvel appairage est nécessaire")
+)
+
+// wireError donne le texte d'une erreur à envoyer à l'autre ordinateur : la
+// clé française pour les erreurs connues, le message sinon.
+func wireError(err error) string {
+	switch {
+	case errors.Is(err, ErrCodeExpired):
+		return msgCodeExpired
+	case errors.Is(err, ErrCodeRevoked):
+		return msgCodeRevoked
+	case errors.Is(err, ErrNoSession):
+		return msgNoSession
+	}
+	return err.Error()
+}
+
+// peerError reconstruit une erreur reçue de l'autre ordinateur : les
+// erreurs d'appairage connues redeviennent les erreurs du paquet (pour
+// errors.Is), les autres sont traduites si possible.
+func peerError(msg string) error {
+	switch msg {
+	case msgCodeExpired:
+		return ErrCodeExpired
+	case msgCodeRevoked:
+		return ErrCodeRevoked
+	case msgNoSession:
+		return ErrNoSession
+	}
+	return errors.New(i18n.T(msg))
+}
 
 // Conn est une session appairée.
 type Conn struct {
@@ -187,7 +225,7 @@ func (p *Pairer) Accept(ctx context.Context, raw net.Conn, cfg *tls.Config) (*Co
 		return nil, err
 	}
 	fail := func(err error) (*Conn, error) {
-		wire.WriteJSON(c, hello{Type: "error", Error: err.Error()})
+		wire.WriteJSON(c, hello{Type: "error", Error: wireError(err)})
 		c.Close()
 		return nil, err
 	}
@@ -200,7 +238,7 @@ func (p *Pairer) Accept(ctx context.Context, raw net.Conn, cfg *tls.Config) (*Co
 		return p.acceptResume(c, in)
 	}
 	if in.Type != "hello" || in.Protocol != wire.Protocol {
-		return fail(fmt.Errorf("version de protocole incompatible (%d)", in.Protocol))
+		return fail(i18n.Errorf("version de protocole incompatible (%d)", in.Protocol))
 	}
 	code, err := p.current()
 	if err != nil {
@@ -246,7 +284,7 @@ func (p *Pairer) acceptResume(c *tls.Conn, in hello) (*Conn, error) {
 	key := p.resume
 	p.mu.Unlock()
 	fail := func(err error) (*Conn, error) {
-		wire.WriteJSON(c, hello{Type: "error", Error: err.Error()})
+		wire.WriteJSON(c, hello{Type: "error", Error: wireError(err)})
 		c.Close()
 		return nil, err
 	}
@@ -292,7 +330,7 @@ func Resume(ctx context.Context, addr string, key []byte, name string) (*Conn, e
 	if in.Type != "resumed" || !hmac.Equal(in.Conf, resumeProof(key, bind, pake.RoleTarget)) {
 		c.Close()
 		if in.Error != "" {
-			return nil, errors.New(in.Error)
+			return nil, peerError(in.Error)
 		}
 		return nil, ErrNoSession
 	}
@@ -342,7 +380,7 @@ func Dial(ctx context.Context, addr, code, name string) (*Conn, error) {
 	}
 	if in.Type == "error" {
 		c.Close()
-		return nil, errors.New(in.Error)
+		return nil, peerError(in.Error)
 	}
 	keys, err := st.Finish(in.Spake)
 	if err != nil {

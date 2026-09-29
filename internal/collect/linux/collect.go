@@ -3,13 +3,13 @@ package linux
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
 
@@ -46,11 +46,11 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 		Agent:     opt.AgentVersion,
 		Source:    readSource(opt.Root),
 	}
-	warn := func(format string, a ...any) { inv.Warnings = append(inv.Warnings, fmt.Sprintf(format, a...)) }
+	warn := func(s string) { inv.Warnings = append(inv.Warnings, s) }
 
 	users, err := readUsers(opt.Root)
 	if err != nil {
-		return nil, fmt.Errorf("lecture des comptes impossible : %w", err)
+		return nil, i18n.Errorf("lecture des comptes impossible : %w", err)
 	}
 	inv.Users = users
 
@@ -72,7 +72,7 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 		case errors.Is(err, ErrMissingCommand):
 			// Normal : Flatpak ou Snap non installé sur la source.
 		case err != nil:
-			warn("inventaire %s incomplet : %v", src.label, err)
+			warn(i18n.Tf("inventaire %s incomplet : %v", src.label, err))
 		}
 		inv.Apps = append(inv.Apps, apps...)
 	}
@@ -104,29 +104,29 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	} else if wifi, err := wifiNetworks(ctx, opt.Runner); err == nil {
 		inv.Network.Wifi = wifi
 	} else if !errors.Is(err, ErrMissingCommand) {
-		warn("réseaux Wi-Fi non inventoriés : %v", err)
+		warn(i18n.Tf("réseaux Wi-Fi non inventoriés : %v", err))
 	}
 	if offline {
 		inv.Network.Printers = offlinePrinters(opt.Root)
 	} else if pr, err := printers(ctx, opt.Runner); err == nil {
 		inv.Network.Printers = pr
 	} else if !errors.Is(err, ErrMissingCommand) {
-		warn("imprimantes non inventoriées : %v", err)
+		warn(i18n.Tf("imprimantes non inventoriées : %v", err))
 	}
 
 	if !opt.SkipData {
 		for i, u := range inv.Users {
 			home := filepath.Join(opt.Root, u.Home)
 			if _, err := os.Lstat(home); err != nil {
-				warn("dossier personnel de %s introuvable (%s)", u.Login, u.Home)
+				warn(i18n.Tf("dossier personnel de %s introuvable (%s)", u.Login, u.Home))
 				continue
 			}
 			st, err := measure(home, DefaultExcludes)
 			if err != nil {
-				warn("mesure de %s incomplète : %v", u.Home, err)
+				warn(i18n.Tf("mesure de %s incomplète : %v", u.Home, err))
 			}
 			if st.Unreadable > 0 {
-				warn("%d éléments illisibles dans %s (droits insuffisants ?)", st.Unreadable, u.Home)
+				warn(i18n.Tf("%d éléments illisibles dans %s (droits insuffisants ?)", st.Unreadable, u.Home))
 			}
 			inv.DataSets = append(inv.DataSets, inventory.DataSet{
 				ID:        "d" + strconv.Itoa(i+1),

@@ -16,13 +16,13 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/source"
@@ -793,7 +793,7 @@ func Begin(journalPath, inventoryDigest string) (*journal.Journal, *journal.Stat
 		return nil, nil, err
 	}
 	if st.Inventory != "" && st.Inventory != inventoryDigest {
-		return nil, nil, fmt.Errorf("ce journal appartient à une autre migration (inventaire différent)")
+		return nil, nil, errors.New(i18n.T("ce journal appartient à une autre migration (inventaire différent)"))
 	}
 	j, err := journal.Open(journalPath)
 	if err != nil {

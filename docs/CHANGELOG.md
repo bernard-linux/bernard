@@ -1,5 +1,21 @@
 # Historique des versions
 
+## 0.8.0 — 29 septembre 2026
+
+**Bernard parle anglais.** Il prend la langue du système : français si
+l'ordinateur est en français, anglais sinon. Tout est traduit : assistant
+graphique, fenêtre, messages d'erreur, bilan (« Migration report (Bernard) »
+dans Documents), lignes de commande de `bernard` et `bernard-agent`.
+
+- La langue est celle de la session qui lance Bernard (le moteur, lancé en
+  administrateur, la reçoit du lanceur ; à défaut, `/etc/default/locale`).
+- Ce que l'ancien ordinateur décrit (noms des données hors dossiers
+  personnels, avertissements) est rédigé dans sa propre langue ; les
+  erreurs d'appairage, elles, s'affichent dans la langue de chaque
+  ordinateur.
+- Nombres, dates et tailles au format de la langue (« 2,5 Go » / « 2.5 GB »).
+- Un test vérifie qu'aucun texte n'est resté sans traduction.
+
 ## 0.7.0 — 29 septembre 2026
 
 **Finitions.**

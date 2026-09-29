@@ -32,6 +32,7 @@ import (
 
 	"github.com/zeebo/blake3"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/source"
 )
@@ -52,10 +53,14 @@ const (
 
 // Erreurs.
 var (
-	ErrBadPassphrase = errors.New("phrase de passe incorrecte")
-	ErrIncomplete    = errors.New("paquet incomplet : son écriture a été interrompue, il faut le recréer")
-	ErrCorrupt       = errors.New("paquet altéré : un bloc chiffré ne correspond pas")
+	ErrBadPassphrase = i18n.NewError("phrase de passe incorrecte")
+	ErrIncomplete    = i18n.NewError("paquet incomplet : son écriture a été interrompue, il faut le recréer")
+	ErrCorrupt       = i18n.NewError("paquet altéré : un bloc chiffré ne correspond pas")
 )
+
+// msgChanged : fichier modifié pendant sa lecture (relu). Gardé en français
+// (clé) dans FileError.Msg et dans le paquet ; traduit à l'affichage.
+var msgChanged = i18n.N("modifié pendant la lecture")
 
 type header struct {
 	Format     string `json:"format"`
@@ -222,7 +227,7 @@ func (w *objWriter) close() error {
 // La source est lue sans être modifiée.
 func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string, opt WriteOptions) (*WriteReport, error) {
 	if len(passphrase) < 8 {
-		return nil, errors.New("la phrase de passe doit faire au moins 8 caractères")
+		return nil, errors.New(i18n.T("la phrase de passe doit faire au moins 8 caractères"))
 	}
 	if opt.ObjectLimit <= 0 {
 		opt.ObjectLimit = DefaultObjectLimit
@@ -234,7 +239,7 @@ func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string
 		return nil, err
 	}
 	if items, _ := os.ReadDir(dir); len(items) > 0 {
-		return nil, fmt.Errorf("%s n'est pas vide : choisissez un dossier vide", dir)
+		return nil, i18n.Errorf("%s n'est pas vide : choisissez un dossier vide", dir)
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -343,7 +348,7 @@ func writeFile(ow *objWriter, aead cipher.AEAD, root string, e source.Entry, ind
 		}
 		lastErr = err
 		var fe *source.FileError
-		if !errors.As(err, &fe) || fe.Msg != "modifié pendant la lecture" {
+		if !errors.As(err, &fe) || fe.Msg != msgChanged {
 			return en, err
 		}
 	}
@@ -372,7 +377,7 @@ func writeFileOnce(ow *objWriter, aead cipher.AEAD, root string, e source.Entry,
 			// Taille atteinte : vérifier qu'il ne reste rien (fichier grossi).
 			var probe [1]byte
 			if m, _ := f.Read(probe[:]); m > 0 {
-				return en, &source.FileError{Rel: e.Rel, Msg: "modifié pendant la lecture"}
+				return en, &source.FileError{Rel: e.Rel, Msg: msgChanged}
 			}
 		}
 		h.Write(buf[:n])
@@ -394,7 +399,7 @@ func writeFileOnce(ow *objWriter, aead cipher.AEAD, root string, e source.Entry,
 	}
 	after, err := f.Stat()
 	if err != nil || total != info.Size() || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
-		return en, &source.FileError{Rel: e.Rel, Msg: "modifié pendant la lecture"}
+		return en, &source.FileError{Rel: e.Rel, Msg: msgChanged}
 	}
 	en.Chunks = chunk
 	en.Hash = "blake3:" + hex.EncodeToString(h.Sum(nil))
@@ -451,20 +456,20 @@ type Pack struct {
 func Open(dir, passphrase string) (*Pack, error) {
 	b, err := os.ReadFile(filepath.Join(dir, headerName))
 	if err != nil {
-		return nil, fmt.Errorf("pas de paquet Bernard dans %s : %w", dir, err)
+		return nil, i18n.Errorf("pas de paquet Bernard dans %s : %w", dir, err)
 	}
 	var h header
 	if err := json.Unmarshal(b, &h); err != nil {
 		return nil, err
 	}
 	if h.Format != Format {
-		return nil, fmt.Errorf("format de paquet non pris en charge : %q", h.Format)
+		return nil, i18n.Errorf("format de paquet non pris en charge : %q", h.Format)
 	}
 	if !h.Complete {
 		return nil, ErrIncomplete
 	}
 	if h.Iterations <= 0 || h.Iterations > maxIterations {
-		return nil, errors.New("en-tête de paquet invalide")
+		return nil, errors.New(i18n.T("en-tête de paquet invalide"))
 	}
 	aead, err := newAEAD(pbkdf2([]byte(passphrase), h.Salt, h.Iterations))
 	if err != nil {
@@ -502,12 +507,12 @@ func (p *Pack) Inventory(context.Context) (*inventory.Inventory, error) {
 func (p *Pack) List(_ context.Context, ds string, fn func(source.Entry) error) error {
 	list, ok := p.man.Entries[ds]
 	if !ok {
-		return &source.FileError{Msg: "jeu de données absent du paquet : " + ds}
+		return &source.FileError{Msg: i18n.Tf("jeu de données absent du paquet : %s", ds)}
 	}
 	for _, e := range list {
 		se := e.Entry
 		if e.Error != "" {
-			se = source.Entry{Rel: e.Rel, Kind: source.KindUnreadable, Link: e.Error}
+			se = source.Entry{Rel: e.Rel, Kind: source.KindUnreadable, Link: i18n.T(e.Error)}
 		}
 		if err := fn(se); err != nil {
 			return err
@@ -519,7 +524,7 @@ func (p *Pack) List(_ context.Context, ds string, fn func(source.Entry) error) e
 func (p *Pack) Get(_ context.Context, ds, rel string, offset int64) (source.FileStream, error) {
 	e, ok := p.idx[ds][rel]
 	if !ok || e.Kind != source.KindFile || e.Error != "" {
-		return nil, &source.FileError{Rel: rel, Msg: "absent du paquet"}
+		return nil, &source.FileError{Rel: rel, Msg: i18n.T("absent du paquet")}
 	}
 	f, err := os.Open(filepath.Join(p.dir, objName(e.Obj)))
 	if err != nil {
@@ -540,7 +545,7 @@ func (p *Pack) Close() error { return nil }
 // Secrets renvoie les hachages de mots de passe stockés dans le paquet.
 func (p *Pack) Secrets(context.Context) (map[string]string, error) {
 	if p.man.Secrets == nil {
-		return nil, errors.New("aucun mot de passe dans le paquet")
+		return nil, errors.New(i18n.T("aucun mot de passe dans le paquet"))
 	}
 	return p.man.Secrets, nil
 }
@@ -548,7 +553,7 @@ func (p *Pack) Secrets(context.Context) (map[string]string, error) {
 // Extras renvoie les réglages stockés dans le paquet.
 func (p *Pack) Extras(_ context.Context, out any) error {
 	if len(p.man.Extras) == 0 {
-		return errors.New("aucun réglage dans le paquet")
+		return errors.New(i18n.T("aucun réglage dans le paquet"))
 	}
 	return json.Unmarshal(p.man.Extras, out)
 }
@@ -577,7 +582,7 @@ func (s *packStream) next() error {
 			s.f.Close()
 			s.obj++
 			if s.f, err = os.Open(filepath.Join(s.p.dir, objName(s.obj))); err != nil {
-				return fmt.Errorf("%w : fichier %s manquant", ErrCorrupt, objName(s.obj))
+				return i18n.Errorf("%w : fichier %s manquant", ErrCorrupt, objName(s.obj))
 			}
 			continue
 		}

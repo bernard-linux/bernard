@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/settings"
 	"github.com/bernard-linux/bernard/internal/sysexec"
@@ -52,7 +53,7 @@ func CollectExtras(ctx context.Context, root, desktop string, users []inventory.
 	}
 
 	if root != "/" {
-		warn("préférences du bureau et imprimantes non lues : système monté depuis un autre disque")
+		warn(i18n.T("préférences du bureau et imprimantes non lues : système monté depuis un autre disque"))
 		return ex
 	}
 
@@ -79,7 +80,7 @@ func CollectExtras(ctx context.Context, root, desktop string, users []inventory.
 		out, err := exec(ctx, sysexec.Cmd{Name: "runuser", Args: []string{"-u", u.Login, "--", "env",
 			"HOME=" + u.Home, "XDG_CONFIG_HOME=" + filepath.Join(u.Home, ".config"), "dconf", "dump", "/"}})
 		if err != nil {
-			warn("préférences du bureau de " + u.Login + " non lues")
+			warn(i18n.Tf("préférences du bureau de %s non lues", u.Login))
 			continue
 		}
 		ex.Dconf[u.Login] = out

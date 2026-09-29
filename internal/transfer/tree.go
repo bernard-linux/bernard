@@ -1,10 +1,11 @@
 package transfer
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // TreeOptions paramètre CopyTree.
@@ -48,7 +49,7 @@ func CopyTree(srcRoot, dstRoot string, opt TreeOptions) (*TreeReport, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("%s n'est pas un dossier", srcRoot)
+		return nil, i18n.Errorf("%s n'est pas un dossier", srcRoot)
 	}
 	if err := os.MkdirAll(dstRoot, info.Mode().Perm()|0o700); err != nil {
 		return nil, err

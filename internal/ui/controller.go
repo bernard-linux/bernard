@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/directlink"
 	"github.com/bernard-linux/bernard/internal/discovery"
 	"github.com/bernard-linux/bernard/internal/engine"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/keepawake"
 	"github.com/bernard-linux/bernard/internal/link"
@@ -194,11 +194,11 @@ func (c *Controller) log(msg string) {
 			s.Log = s.Log[len(s.Log)-300:]
 		}
 		switch msg {
-		case linkLostMsg:
+		case linkLostMsg, i18n.T(linkLostMsg):
 			if s.Progress != nil {
 				s.Progress.LinkLost = true
 			}
-		case linkBackMsg:
+		case linkBackMsg, i18n.T(linkBackMsg):
 			if s.Progress != nil {
 				s.Progress.LinkLost = false
 			}
@@ -206,6 +206,8 @@ func (c *Controller) log(msg string) {
 	})
 }
 
+// Messages du journal envoyés par le paquet link, reconnus ici en français
+// comme en traduction.
 const (
 	linkLostMsg = "Liaison perdue. En attente de l'ancien ordinateur ; le transfert reprendra seul…"
 	linkBackMsg = "Reconnecté. Reprise du transfert."
@@ -225,13 +227,13 @@ func (c *Controller) begin() (context.Context, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cancel != nil {
-		return nil, errors.New("une migration est déjà en cours")
+		return nil, errors.New(i18n.T("une migration est déjà en cours"))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel, c.ctx = cancel, ctx
 	// Un ordinateur en veille disparaît du réseau : la veille est bloquée
 	// tant que Bernard attend ou transfère.
-	c.lock = keepawake.Acquire("Bernard : migration en cours")
+	c.lock = keepawake.Acquire(i18n.T("Bernard : migration en cours"))
 	c.cable = directlink.Start(c.log)
 	return ctx, nil
 }
@@ -262,7 +264,7 @@ func (c *Controller) StartNetwork() error {
 	ln, err := lc.Listen(ctx, "tcp", ":"+strconv.Itoa(c.Port))
 	if err != nil {
 		c.end()
-		return fmt.Errorf("le port %d est occupé : une autre instance de Bernard est-elle ouverte ?", c.Port)
+		return i18n.Errorf("le port %d est occupé : une autre instance de Bernard est-elle ouverte ?", c.Port)
 	}
 	pairer, err := session.NewPairer(c.st.Host)
 	if err != nil {
@@ -291,7 +293,7 @@ func (c *Controller) StartNetwork() error {
 		s.Step, s.Mode, s.Code, s.Port, s.Addresses, s.Error = StepNetwork, "network", pairer.Code(), c.Port, addrs, ""
 	})
 	accept := link.NewAccepter(ln, pairer, cfg, nil, func(err error) {
-		c.log("Connexion refusée : " + err.Error())
+		c.log(i18n.Tf("Connexion refusée : %s", err.Error()))
 		if renewed, _ := pairer.RenewIfNeeded(); renewed {
 			c.update(func(s *State) { s.Code = pairer.Code() })
 		}
@@ -313,11 +315,11 @@ func (c *Controller) StartNetwork() error {
 		logf := func(msg string) {
 			c.log(msg)
 			switch msg {
-			case linkLostMsg:
+			case linkLostMsg, i18n.T(linkLostMsg):
 				if pairer.Renew() == nil {
 					c.update(func(s *State) { s.Code = pairer.Code() })
 				}
-			case linkBackMsg:
+			case linkBackMsg, i18n.T(linkBackMsg):
 				c.update(func(s *State) { s.Code = "" })
 			}
 		}
@@ -527,14 +529,14 @@ func (c *Controller) ScheduleRemoval(login string, on bool) error {
 	sess, step := c.sess, c.st.Step
 	c.mu.Unlock()
 	if step != StepReport || sess == nil {
-		return errors.New("possible seulement à la fin de la migration")
+		return errors.New(i18n.T("possible seulement à la fin de la migration"))
 	}
 	allowed := false
 	for _, a := range extraAccounts(sess) {
 		allowed = allowed || a.Login == login
 	}
 	if !allowed {
-		return errors.New("ce compte fait partie de la migration : il ne peut pas être supprimé ici")
+		return errors.New(i18n.T("ce compte fait partie de la migration : il ne peut pas être supprimé ici"))
 	}
 	sys := system.New()
 	var err error
@@ -542,7 +544,7 @@ func (c *Controller) ScheduleRemoval(login string, on bool) error {
 		self, _ := os.Executable()
 		err = sys.ScheduleRemoval(context.Background(), login, self)
 		if errors.Is(err, system.ErrLastAdmin) {
-			err = errors.New("aucun compte migré n'est administrateur : gardez ce compte, sinon plus personne ne pourrait gérer l'ordinateur")
+			err = errors.New(i18n.T("aucun compte migré n'est administrateur : gardez ce compte, sinon plus personne ne pourrait gérer l'ordinateur"))
 		}
 	} else {
 		err = sys.CancelRemoval(context.Background(), login)
@@ -560,7 +562,7 @@ func (c *Controller) Submit(ids map[string]bool, passwords map[string]string) er
 	step := c.st.Step
 	c.mu.Unlock()
 	if sess == nil || step != StepChoose {
-		return errors.New("aucun plan en attente de validation")
+		return errors.New(i18n.T("aucun plan en attente de validation"))
 	}
 	ch := migrate.Choices{Selected: map[string]bool{}, Passwords: passwords}
 	for _, a := range sess.Plan.Actions {
@@ -573,12 +575,12 @@ func (c *Controller) Submit(ids map[string]bool, passwords map[string]string) er
 	check.Actions = append([]plan.Action(nil), sess.Plan.Actions...)
 	ch.ApplyTo(&check)
 	if check.Blocked {
-		return errors.New("la sélection ne tient pas sur ce disque : décochez des dossiers")
+		return errors.New(i18n.T("la sélection ne tient pas sur ce disque : décochez des dossiers"))
 	}
 	for _, login := range c.Snapshot().NeedPass {
 		for _, a := range check.Actions {
 			if a.Op == plan.OpCreateUser && a.Login == login && a.Selected && len(passwords[login]) < 1 {
-				return fmt.Errorf("choisissez un mot de passe pour le compte %s", login)
+				return i18n.Errorf("choisissez un mot de passe pour le compte %s", login)
 			}
 		}
 	}
@@ -586,7 +588,7 @@ func (c *Controller) Submit(ids map[string]bool, passwords map[string]string) er
 	case c.choices <- ch:
 		return nil
 	default:
-		return errors.New("choix déjà transmis")
+		return errors.New(i18n.T("choix déjà transmis"))
 	}
 }
 
@@ -624,7 +626,7 @@ func (c *Controller) UndoMigration() error {
 	sess := c.sess
 	c.mu.Unlock()
 	if sess == nil {
-		return errors.New("aucune migration à annuler")
+		return errors.New(i18n.T("aucune migration à annuler"))
 	}
 	c.end()
 	c.update(func(s *State) { s.Busy = true })
@@ -654,7 +656,7 @@ func (c *Controller) Reboot() error {
 	step := c.st.Step
 	c.mu.Unlock()
 	if step != StepReport {
-		return errors.New("redémarrage possible seulement à la fin de la migration")
+		return errors.New(i18n.T("redémarrage possible seulement à la fin de la migration"))
 	}
 	c.end()
 	_, err := sysexec.Run(context.Background(), sysexec.Cmd{Name: "systemctl", Args: []string{"reboot"}})

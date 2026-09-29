@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"io/fs"
 	"net"
 	"net/http"
@@ -79,6 +80,12 @@ func (s *Server) routes() http.Handler {
 	static, _ := fs.Sub(webFS, "web")
 	files := http.FileServer(http.FS(static))
 	mux.Handle("/", securityHeaders(files))
+	// Langue de l'interface, lue par app.js avant tout affichage.
+	mux.Handle("/lang.js", securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprintf(w, "window.BERNARD_LANG = %q;\n", i18n.Lang())
+	})))
 
 	api := http.NewServeMux()
 	api.HandleFunc("/api/state", s.handleState)
@@ -124,7 +131,7 @@ func (s *Server) guard(h http.Handler) http.Handler {
 	port := strconv.Itoa(s.ln.Addr().(*net.TCPAddr).Port)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != "127.0.0.1:"+port && r.Host != "localhost:"+port {
-			http.Error(w, "hôte refusé", http.StatusForbidden)
+			http.Error(w, i18n.T("hôte refusé"), http.StatusForbidden)
 			return
 		}
 		tok := r.Header.Get("X-Bernard-Token")
@@ -132,7 +139,7 @@ func (s *Server) guard(h http.Handler) http.Handler {
 			tok = r.URL.Query().Get("t")
 		}
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.Token)) != 1 {
-			http.Error(w, "jeton refusé", http.StatusUnauthorized)
+			http.Error(w, i18n.T("jeton refusé"), http.StatusUnauthorized)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -143,7 +150,7 @@ func (s *Server) guard(h http.Handler) http.Handler {
 func (s *Server) post(f func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "POST attendu", http.StatusMethodNotAllowed)
+			http.Error(w, i18n.T("POST attendu"), http.StatusMethodNotAllowed)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -177,7 +184,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.clientSeen()
 	fl, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "flux non pris en charge", http.StatusInternalServerError)
+		http.Error(w, i18n.T("flux non pris en charge"), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -234,7 +241,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) error {
 		s.Ctrl.ShowDisk()
 		return nil
 	}
-	return fmt.Errorf("mode inconnu : %q", req.Mode)
+	return i18n.Errorf("mode inconnu : %q", req.Mode)
 }
 
 func (s *Server) handleDisk(w http.ResponseWriter, r *http.Request) error {
@@ -278,7 +285,7 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) error {
 	case "disk":
 		return s.Ctrl.ShowSourceDisk()
 	}
-	return fmt.Errorf("mode inconnu : %q", req.Mode)
+	return i18n.Errorf("mode inconnu : %q", req.Mode)
 }
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) error {

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"io"
 	"net"
 	"os"
@@ -43,7 +44,8 @@ import (
 	"github.com/bernard-linux/bernard/internal/version"
 )
 
-const usage = `bernard — moteur de Bernard, l'assistant de migration vers Linux
+// usage est traduit à l'affichage (i18n.T).
+var usage = i18n.N(`bernard — moteur de Bernard, l'assistant de migration vers Linux
 
 Usage :
   bernard gui [--browser]
@@ -69,11 +71,13 @@ Usage :
       Supprime un compte provisoire et son dossier personnel (utilisé au
       démarrage quand la suppression a été programmée en fin de migration).
   bernard version
-`
+`)
 
 func main() {
+	// Langue du système : français s'il est en français, anglais sinon.
+	i18n.Set(i18n.Detect(os.Getenv, "/"))
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, i18n.T(usage))
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -100,7 +104,7 @@ func main() {
 	case "version":
 		fmt.Println(version.Version)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, i18n.T(usage))
 		code = 2
 	}
 	os.Exit(code)
@@ -113,7 +117,7 @@ func progressPrinter() func(engine.Progress) {
 	return func(p engine.Progress) {
 		if pct := p.Files * 100 / max(p.Total, 1); pct/10 != last/10 || p.Files == p.Total {
 			last = pct
-			fmt.Printf("\r  %s : %d / %d éléments (%d %%), %.1f Mo reçus    ", p.Dataset, p.Files, p.Total, pct, float64(p.Bytes)/1e6)
+			fmt.Print(i18n.Tf("\r  %s : %d / %d éléments (%d %%), %.1f Mo reçus    ", p.Dataset, p.Files, p.Total, pct, float64(p.Bytes)/1e6))
 			if p.Files == p.Total {
 				fmt.Println()
 			}
@@ -125,16 +129,16 @@ func printReports(reports map[string]*transfer.TreeReport) bool {
 	ok := true
 	for id, rep := range reports {
 		ok = ok && rep.OK()
-		fmt.Printf("%s : %d fichiers copiés et vérifiés (%.1f Mo), %d déjà présents\n",
-			id, rep.Files, float64(rep.Bytes)/1e6, rep.AlreadyPresent)
+		fmt.Print(i18n.Tf("%s : %d fichiers copiés et vérifiés (%.1f Mo), %d déjà présents\n",
+			id, rep.Files, float64(rep.Bytes)/1e6, rep.AlreadyPresent))
 		for _, r := range rep.Renamed {
-			fmt.Println("  Renommé (un fichier du même nom existait) :", r.Dst)
+			fmt.Println(i18n.T("  Renommé (un fichier du même nom existait) :"), r.Dst)
 		}
 		for _, s := range rep.Skipped {
-			fmt.Println("  Non migrable (fichier spécial) :", s)
+			fmt.Println(i18n.T("  Non migrable (fichier spécial) :"), s)
 		}
 		for _, e := range rep.Errors {
-			fmt.Printf("  ERREUR %s : %s\n", e.Path, e.Err)
+			fmt.Print(i18n.Tf("  ERREUR %s : %s\n", e.Path, e.Err))
 		}
 	}
 	return ok
@@ -148,39 +152,39 @@ func runMigration(ctx context.Context, src source.Source, dest string) int {
 		printReports(sum.Reports)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Migration interrompue :", err)
-		fmt.Fprintln(os.Stderr, "Relancez la même commande pour reprendre ; rien de ce qui est déjà vérifié ne sera recopié.")
+		fmt.Fprintln(os.Stderr, i18n.T("Migration interrompue :"), err)
+		fmt.Fprintln(os.Stderr, i18n.T("Relancez la même commande pour reprendre ; rien de ce qui est déjà vérifié ne sera recopié."))
 		return 1
 	}
-	fmt.Println("Journal :", jp)
+	fmt.Println(i18n.T("Journal :"), jp)
 	if !sum.OK() {
-		fmt.Println("Terminé avec des éléments non copiés (voir ci-dessus).")
+		fmt.Println(i18n.T("Terminé avec des éléments non copiés (voir ci-dessus)."))
 		return 1
 	}
-	fmt.Println("Migration terminée : tout a été copié et vérifié.")
+	fmt.Println(i18n.T("Migration terminée : tout a été copié et vérifié."))
 	return 0
 }
 
 func runReceive(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("receive", flag.ExitOnError)
-	dest := fs.String("dest", "", "mode essai : dossier de destination")
-	sysMode := fs.Bool("system", false, "migration réelle (comptes, applications, /home) ; nécessite sudo")
-	yes := fs.Bool("yes", false, "ne pas demander de confirmation du plan")
-	port := fs.Int("port", 51516, "port TCP d'appairage")
+	dest := fs.String("dest", "", i18n.T("mode essai : dossier de destination"))
+	sysMode := fs.Bool("system", false, i18n.T("migration réelle (comptes, applications, /home) ; nécessite sudo"))
+	yes := fs.Bool("yes", false, i18n.T("ne pas demander de confirmation du plan"))
+	port := fs.Int("port", 51516, i18n.T("port TCP d'appairage"))
 	fs.Parse(args)
 	if (*dest == "") == !*sysMode || (*dest != "" && *sysMode) {
-		fmt.Fprintln(os.Stderr, "Choisissez --system (migration réelle) ou --dest DOSSIER (essai).")
+		fmt.Fprintln(os.Stderr, i18n.T("Choisissez --system (migration réelle) ou --dest DOSSIER (essai)."))
 		return 2
 	}
 	if *sysMode && os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "La migration réelle crée des comptes et installe des applications : lancez-la avec sudo.")
+		fmt.Fprintln(os.Stderr, i18n.T("La migration réelle crée des comptes et installe des applications : lancez-la avec sudo."))
 		return 1
 	}
 
 	lc := net.ListenConfig{KeepAlive: session.KeepAlive}
 	ln, err := lc.Listen(ctx, "tcp", ":"+strconv.Itoa(*port))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Écoute impossible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Écoute impossible :"), err)
 		return 1
 	}
 	defer ln.Close()
@@ -203,24 +207,24 @@ func runReceive(ctx context.Context, args []string) int {
 	go discovery.Announce(ctx, discovery.Beacon{ID: hex.EncodeToString(idb), Name: host, Port: *port})
 
 	showCode := func() {
-		fmt.Printf("\nSur l'ancien ordinateur, lancez : sudo bernard-agent connect\nCode d'appairage : %s\n", spaced(pairer.Code()))
+		fmt.Print(i18n.Tf("\nSur l'ancien ordinateur, lancez : sudo bernard-agent connect\nCode d'appairage : %s\n", spaced(pairer.Code())))
 		for _, itf := range discovery.Interfaces() {
-			fmt.Printf("  (si la recherche échoue : --target <adresse de %s>:%d)\n", itf.Name, *port)
+			fmt.Print(i18n.Tf("  (si la recherche échoue : --target <adresse de %s>:%d)\n", itf.Name, *port))
 		}
 	}
 	showCode()
 	accept := link.NewAccepter(ln, pairer, cfg, nil, func(err error) {
-		fmt.Println("Connexion refusée :", err)
+		fmt.Println(i18n.T("Connexion refusée :"), err)
 		if renewed, _ := pairer.RenewIfNeeded(); renewed {
 			showCode()
 		}
 	})
 	first, err := accept(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Arrêt :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Arrêt :"), err)
 		return 1
 	}
-	fmt.Printf("Appairé avec %s.\n", first.PeerName)
+	fmt.Print(i18n.Tf("Appairé avec %s.\n", first.PeerName))
 
 	var run func(context.Context, *remote.Client) error
 	if *sysMode {
@@ -230,18 +234,18 @@ func runReceive(ctx context.Context, args []string) int {
 			sum, err := engine.RunAll(ctx, cli, *dest, journalPath(*dest), progressPrinter())
 			if sum != nil && err == nil {
 				printReports(sum.Reports)
-				fmt.Println("Journal :", journalPath(*dest))
+				fmt.Println(i18n.T("Journal :"), journalPath(*dest))
 			}
 			return err
 		}
 	}
 	err = link.ReceiveWithReconnect(ctx, first, accept, run, func(msg string) { fmt.Println("\n" + msg) })
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Migration interrompue :", err)
-		fmt.Fprintln(os.Stderr, "Relancez les deux commandes pour reprendre : rien de ce qui est vérifié ne sera refait.")
+		fmt.Fprintln(os.Stderr, i18n.T("Migration interrompue :"), err)
+		fmt.Fprintln(os.Stderr, i18n.T("Relancez les deux commandes pour reprendre : rien de ce qui est vérifié ne sera refait."))
 		return 1
 	}
-	fmt.Println("Migration terminée.")
+	fmt.Println(i18n.T("Migration terminée."))
 	return 0
 }
 
@@ -263,28 +267,28 @@ func systemRun(yes bool) func(context.Context, *remote.Client) error {
 			if !confirmed {
 				printPlan(sess.Plan, sess.Inv, sess.Warnings)
 				if sess.Plan.Blocked {
-					return errors.New("espace disque insuffisant")
+					return errors.New(i18n.T("espace disque insuffisant"))
 				}
-				fmt.Print("Lancer la migration ? [o/N] ")
+				fmt.Print(i18n.T("Lancer la migration ? [o/N] "))
 				ans, _ := in.ReadString('\n')
-				if a := strings.ToLower(strings.TrimSpace(ans)); a != "o" && a != "oui" && a != "y" {
-					return errors.New("migration annulée avant toute modification")
+				if a := strings.ToLower(strings.TrimSpace(ans)); a != "o" && a != "oui" && a != "y" && a != "yes" {
+					return errors.New(i18n.T("migration annulée avant toute modification"))
 				}
 				confirmed = true
 			}
 			choices = &migrate.Choices{Passwords: map[string]string{}}
 			for _, login := range migrate.MissingPasswords(sess, secrets) {
 				for {
-					fmt.Printf("Nouveau mot de passe pour %s : ", login)
+					fmt.Print(i18n.Tf("Nouveau mot de passe pour %s : ", login))
 					a, _ := in.ReadString('\n')
-					fmt.Printf("Confirmez : ")
+					fmt.Print(i18n.T("Confirmez : "))
 					b, _ := in.ReadString('\n')
 					a, b = strings.TrimRight(a, "\r\n"), strings.TrimRight(b, "\r\n")
 					if a != "" && a == b {
 						choices.Passwords[login] = a
 						break
 					}
-					fmt.Println("Les deux saisies diffèrent ou sont vides.")
+					fmt.Println(i18n.T("Les deux saisies diffèrent ou sont vides."))
 				}
 			}
 		}
@@ -296,7 +300,7 @@ func systemRun(yes bool) func(context.Context, *remote.Client) error {
 		if res != nil {
 			if res.System != nil {
 				for name, why := range res.System.Failed {
-					fmt.Printf("  Non installé : %s (%s)\n", name, why)
+					fmt.Print(i18n.Tf("  Non installé : %s (%s)\n", name, why))
 				}
 			}
 			if res.Data != nil {
@@ -304,49 +308,49 @@ func systemRun(yes bool) func(context.Context, *remote.Client) error {
 			}
 			if res.Settings != nil {
 				for _, a := range res.Settings.Applied {
-					fmt.Println("  Repris :", a)
+					fmt.Println(i18n.T("  Repris :"), a)
 				}
 				for k, why := range res.Settings.Skipped {
-					fmt.Printf("  Non repris : %s (%s)\n", k, why)
+					fmt.Print(i18n.Tf("  Non repris : %s (%s)\n", k, why))
 				}
 				for k, why := range res.Settings.Failed {
-					fmt.Printf("  ÉCHEC : %s (%s)\n", k, why)
+					fmt.Print(i18n.Tf("  ÉCHEC : %s (%s)\n", k, why))
 				}
 			}
 		}
 		if err != nil {
 			return err
 		}
-		fmt.Println("Journal (pour annuler : sudo bernard undo --journal) :", res.JournalPath)
+		fmt.Println(i18n.T("Journal (pour annuler : sudo bernard undo --journal) :"), res.JournalPath)
 		return nil
 	}
 }
 
 func printPlan(p *plan.Plan, inv *inventory.Inventory, warnings []string) {
-	fmt.Println("\n=== Plan de migration ===")
+	fmt.Println(i18n.T("\n=== Plan de migration ==="))
 	for _, a := range p.Actions {
 		if !a.Selected {
 			continue
 		}
 		switch a.Op {
 		case plan.OpCreateUser:
-			how := "mot de passe repris"
+			how := i18n.T("mot de passe repris")
 			if a.Password == "ask" {
-				how = "nouveau mot de passe demandé"
+				how = i18n.T("nouveau mot de passe demandé")
 			}
-			fmt.Printf("  Créer le compte %s (%s)\n", a.Login, how)
+			fmt.Print(i18n.Tf("  Créer le compte %s (%s)\n", a.Login, how))
 		case plan.OpUseUser:
-			fmt.Printf("  Utiliser le compte existant %s\n", a.Login)
+			fmt.Print(i18n.Tf("  Utiliser le compte existant %s\n", a.Login))
 		case plan.OpCopy:
-			fmt.Printf("  Copier %s → /home/%s (%.1f Go, %d fichiers)\n", a.Label, a.Login, float64(a.Bytes)/1e9, a.Files)
+			fmt.Print(i18n.Tf("  Copier %s → /home/%s (%.1f Go, %d fichiers)\n", a.Label, a.Login, float64(a.Bytes)/1e9, a.Files))
 		case plan.OpRemove:
-			fmt.Printf("  Retirer %s (absente de l'ancien ordinateur)\n", a.Label)
+			fmt.Print(i18n.Tf("  Retirer %s (absente de l'ancien ordinateur)\n", a.Label))
 		case plan.OpKeyboard:
-			fmt.Printf("  Reprendre la disposition du clavier de l'ancien ordinateur pour %s\n", a.Login)
+			fmt.Print(i18n.Tf("  Reprendre la disposition du clavier de l'ancien ordinateur pour %s\n", a.Login))
 		case plan.OpAddRepo:
-			fmt.Printf("  Ajouter le dépôt de logiciels %s\n", a.Label)
+			fmt.Print(i18n.Tf("  Ajouter le dépôt de logiciels %s\n", a.Label))
 		case plan.OpSystemData:
-			fmt.Printf("  Copier %s (%.1f Go)\n", a.Label, float64(a.Bytes)/1e9)
+			fmt.Print(i18n.Tf("  Copier %s (%.1f Go)\n", a.Label, float64(a.Bytes)/1e9))
 		}
 	}
 	var apt, fp, review int
@@ -360,14 +364,14 @@ func printPlan(p *plan.Plan, inv *inventory.Inventory, warnings []string) {
 			review++
 		}
 	}
-	fmt.Printf("  Installer %d applications depuis les dépôts et %d depuis Flathub\n", apt, fp)
+	fmt.Print(i18n.Tf("  Installer %d applications depuis les dépôts et %d depuis Flathub\n", apt, fp))
 	if review > 0 {
-		fmt.Printf("  %d éléments sans équivalent automatique (listés dans le plan)\n", review)
+		fmt.Print(i18n.Tf("  %d éléments sans équivalent automatique (listés dans le plan)\n", review))
 	}
 	for _, w := range warnings {
-		fmt.Println("  Attention :", w)
+		fmt.Println(i18n.T("  Attention :"), w)
 	}
-	fmt.Printf("  Espace : %.1f Go à copier, %.1f Go libres\n", float64(p.Totals.Bytes)/1e9, float64(p.Target.FreeBytes)/1e9)
+	fmt.Print(i18n.Tf("  Espace : %.1f Go à copier, %.1f Go libres\n", float64(p.Totals.Bytes)/1e9, float64(p.Target.FreeBytes)/1e9))
 }
 
 func spaced(code string) string {
@@ -379,22 +383,22 @@ func spaced(code string) string {
 
 func runUnpack(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("unpack", flag.ExitOnError)
-	dir := fs.String("pack", "", "dossier du paquet sur le disque externe")
-	dest := fs.String("dest", "", "dossier de destination")
+	dir := fs.String("pack", "", i18n.T("dossier du paquet sur le disque externe"))
+	dest := fs.String("dest", "", i18n.T("dossier de destination"))
 	fs.Parse(args)
 	if *dir == "" || *dest == "" {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, i18n.T(usage))
 		return 2
 	}
 	pass := os.Getenv("BERNARD_PASSPHRASE")
 	if pass == "" {
-		fmt.Print("Phrase de passe du paquet : ")
+		fmt.Print(i18n.T("Phrase de passe du paquet : "))
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		pass = strings.TrimSpace(line)
 	}
 	p, err := pack.Open(*dir, pass)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Paquet illisible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Paquet illisible :"), err)
 		return 1
 	}
 	return runMigration(ctx, p, *dest)
@@ -402,46 +406,46 @@ func runUnpack(ctx context.Context, args []string) int {
 
 func runUndo(args []string) int {
 	fs := flag.NewFlagSet("undo", flag.ExitOnError)
-	jp := fs.String("journal", "", "journal de la migration à annuler")
+	jp := fs.String("journal", "", i18n.T("journal de la migration à annuler"))
 	fs.Parse(args)
 	if *jp == "" {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, i18n.T(usage))
 		return 2
 	}
 	st, err := journal.Load(*jp)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Journal illisible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Journal illisible :"), err)
 		return 1
 	}
 	if len(st.Sys) > 0 && os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "Cette migration a créé des comptes ou installé des applications : lancez l'annulation avec sudo.")
+		fmt.Fprintln(os.Stderr, i18n.T("Cette migration a créé des comptes ou installé des applications : lancez l'annulation avec sudo."))
 		return 1
 	}
 	rep, u, err := migrate.Undo(context.Background(), *jp)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Annulation impossible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Annulation impossible :"), err)
 		return 1
 	}
-	fmt.Printf("Supprimés : %d fichiers et liens créés par Bernard, %d dossiers vides, %d fichiers temporaires.\n",
-		rep.Removed, rep.DirsRemoved, rep.Parts)
+	fmt.Print(i18n.Tf("Supprimés : %d fichiers et liens créés par Bernard, %d dossiers vides, %d fichiers temporaires.\n",
+		rep.Removed, rep.DirsRemoved, rep.Parts))
 	for _, k := range rep.Kept {
-		fmt.Println("Conservé (modifié depuis la copie) :", k)
+		fmt.Println(i18n.T("Conservé (modifié depuis la copie) :"), k)
 	}
 	if u != nil {
 		for _, n := range u.Removed {
-			fmt.Println("Application retirée :", n)
+			fmt.Println(i18n.T("Application retirée :"), n)
 		}
 		for _, n := range u.Reinstalled {
-			fmt.Println("Application réinstallée :", n)
+			fmt.Println(i18n.T("Application réinstallée :"), n)
 		}
 		for _, n := range u.Restored {
-			fmt.Println("Fichier d'origine remis en place :", n)
+			fmt.Println(i18n.T("Fichier d'origine remis en place :"), n)
 		}
 		for _, n := range u.UsersDeleted {
-			fmt.Printf("Compte supprimé : %s (son dossier personnel est conservé s'il contient encore des fichiers)\n", n)
+			fmt.Print(i18n.Tf("Compte supprimé : %s (son dossier personnel est conservé s'il contient encore des fichiers)\n", n))
 		}
 		for _, e := range u.Errors {
-			fmt.Println("Non annulé :", e)
+			fmt.Println(i18n.T("Non annulé :"), e)
 		}
 	}
 	return 0
@@ -449,60 +453,60 @@ func runUndo(args []string) int {
 
 func runPlan(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
-	in := fs.String("i", "inventaire.json", "inventaire produit par bernard-agent")
-	out := fs.String("o", "plan.json", "fichier de plan à écrire")
+	in := fs.String("i", "inventaire.json", i18n.T("inventaire produit par bernard-agent"))
+	out := fs.String("o", "plan.json", i18n.T("fichier de plan à écrire"))
 	fs.Parse(args)
 
 	inv, err := inventory.Load(*in)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Inventaire refusé :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Inventaire refusé :"), err)
 		return 1
 	}
 	target, warnings := plan.DetectTarget(ctx, sysexec.Exec)
 	p, err := plan.Build(inv, target)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Plan impossible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Plan impossible :"), err)
 		return 1
 	}
 	if err := p.Save(*out); err != nil {
-		fmt.Fprintln(os.Stderr, "Écriture impossible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Écriture impossible :"), err)
 		return 1
 	}
 	labels := map[string]string{
-		plan.OpCreateUser: "comptes à créer", plan.OpUseUser: "comptes existants réutilisés",
-		plan.OpSetupFlatpak: "installation de Flatpak", plan.OpInstall: "applications à installer",
-		plan.OpCopy: "dossiers à copier", plan.OpImportWifi: "réseaux Wi-Fi à importer", plan.OpImportVPN: "connexions VPN à importer",
-		plan.OpSkip: "éléments déjà présents ou inutiles", plan.OpReview: "actions manuelles proposées",
-		plan.OpSettings: "réglages de comptes", plan.OpAddPrinter: "imprimantes",
-		plan.OpRemove:   "applications absentes de l'ancien ordinateur (retrait proposé)",
-		plan.OpKeyboard: "options de clavier (non cochées)",
-		plan.OpAddRepo:  "dépôts de logiciels à ajouter", plan.OpSystemData: "données hors des dossiers personnels",
-		plan.OpAutoLoginOff: "ouverture de session automatique à couper",
+		plan.OpCreateUser: i18n.T("comptes à créer"), plan.OpUseUser: i18n.T("comptes existants réutilisés"),
+		plan.OpSetupFlatpak: i18n.T("installation de Flatpak"), plan.OpInstall: i18n.T("applications à installer"),
+		plan.OpCopy: i18n.T("dossiers à copier"), plan.OpImportWifi: i18n.T("réseaux Wi-Fi à importer"), plan.OpImportVPN: i18n.T("connexions VPN à importer"),
+		plan.OpSkip: i18n.T("éléments déjà présents ou inutiles"), plan.OpReview: i18n.T("actions manuelles proposées"),
+		plan.OpSettings: i18n.T("réglages de comptes"), plan.OpAddPrinter: i18n.T("imprimantes"),
+		plan.OpRemove:   i18n.T("applications absentes de l'ancien ordinateur (retrait proposé)"),
+		plan.OpKeyboard: i18n.T("options de clavier (non cochées)"),
+		plan.OpAddRepo:  i18n.T("dépôts de logiciels à ajouter"), plan.OpSystemData: i18n.T("données hors des dossiers personnels"),
+		plan.OpAutoLoginOff: i18n.T("ouverture de session automatique à couper"),
 	}
 	sum := p.Summary()
-	fmt.Printf("Cible : %s %s — %.1f Go libres\n", target.Distro, target.Version, float64(target.FreeBytes)/1e9)
+	fmt.Print(i18n.Tf("Cible : %s %s — %.1f Go libres\n", target.Distro, target.Version, float64(target.FreeBytes)/1e9))
 	for _, op := range p.SortedOps() {
 		fmt.Printf("  %4d  %s\n", sum[op], labels[op])
 	}
-	fmt.Printf("Volume à transférer : %.1f Go (%d fichiers)\n", float64(p.Totals.Bytes)/1e9, p.Totals.Files)
+	fmt.Print(i18n.Tf("Volume à transférer : %.1f Go (%d fichiers)\n", float64(p.Totals.Bytes)/1e9, p.Totals.Files))
 	for _, w := range warnings {
-		fmt.Println("Attention :", w)
+		fmt.Println(i18n.T("Attention :"), w)
 	}
 	if p.Blocked {
-		fmt.Println("BLOQUÉ : espace disque insuffisant sur la cible.")
+		fmt.Println(i18n.T("BLOQUÉ : espace disque insuffisant sur la cible."))
 	}
-	fmt.Println("Plan écrit dans", *out, "— rien n'a été modifié.")
+	fmt.Println(i18n.Tf("Plan écrit dans %s — rien n'a été modifié.", *out))
 	return 0
 }
 
 func runCopy(args []string) int {
 	if len(args) != 2 {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, i18n.T(usage))
 		return 2
 	}
 	rep, err := transfer.CopyTree(args[0], args[1], transfer.TreeOptions{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Copie impossible :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Copie impossible :"), err)
 		return 1
 	}
 	enc := json.NewEncoder(os.Stdout)
@@ -519,10 +523,12 @@ func runCopy(args []string) int {
 // quand son entrée standard se ferme (fenêtre fermée par l'utilisateur).
 func runUI(ctx context.Context, args []string) int {
 	fs := flag.NewFlagSet("ui", flag.ExitOnError)
-	stdio := fs.Bool("stdio", false, "s'arrêter à la fermeture de l'entrée standard")
+	stdio := fs.Bool("stdio", false, i18n.T("s'arrêter à la fermeture de l'entrée standard"))
+	lang := fs.String("lang", "", i18n.T("langue de l'interface (fr, en), transmise par « bernard gui »"))
 	fs.Parse(args)
+	i18n.Set(*lang) // pkexec efface l'environnement : langue de la session passée par le lanceur
 	if os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "Le moteur doit être lancé en administrateur : utilisez « bernard gui ».")
+		fmt.Fprintln(os.Stderr, i18n.T("Le moteur doit être lancé en administrateur : utilisez « bernard gui »."))
 		return 1
 	}
 	ctrl := ui.NewController()
@@ -558,14 +564,14 @@ func runUI(ctx context.Context, args []string) int {
 // l'unité systemd que programme l'écran de fin de migration.
 func runRemoveAccount(ctx context.Context, args []string) int {
 	if len(args) != 1 || os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "usage : sudo bernard remove-account IDENTIFIANT")
+		fmt.Fprintln(os.Stderr, i18n.T("usage : sudo bernard remove-account IDENTIFIANT"))
 		return 2
 	}
 	if err := system.New().RemoveAccountNow(ctx, args[0]); err != nil {
-		fmt.Fprintln(os.Stderr, "Compte", args[0], "non supprimé :", err)
+		fmt.Fprintln(os.Stderr, i18n.Tf("Compte %s non supprimé : %v", args[0], err))
 		return 1
 	}
-	fmt.Println("Compte", args[0], "supprimé, avec son dossier personnel.")
+	fmt.Println(i18n.Tf("Compte %s supprimé, avec son dossier personnel.", args[0]))
 	return 0
 }
 
@@ -581,22 +587,22 @@ func runGUI(args []string) int {
 	}
 	var engineCmd *exec.Cmd
 	if os.Geteuid() == 0 {
-		fmt.Fprintln(os.Stderr, "Attention : lancez plutôt « bernard gui » sans sudo ; la fenêtre ne devrait pas tourner en administrateur.")
-		engineCmd = exec.Command(self, "ui", "--stdio")
+		fmt.Fprintln(os.Stderr, i18n.T("Attention : lancez plutôt « bernard gui » sans sudo ; la fenêtre ne devrait pas tourner en administrateur."))
+		engineCmd = exec.Command(self, "ui", "--stdio", "--lang", i18n.Lang())
 	} else {
-		engineCmd = exec.Command("pkexec", self, "ui", "--stdio")
+		engineCmd = exec.Command("pkexec", self, "ui", "--stdio", "--lang", i18n.Lang())
 	}
 	stdin, _ := engineCmd.StdinPipe()
 	stdout, _ := engineCmd.StdoutPipe()
 	engineCmd.Stderr = os.Stderr
 	if err := engineCmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "Impossible de lancer le moteur :", err)
+		fmt.Fprintln(os.Stderr, i18n.T("Impossible de lancer le moteur :"), err)
 		return 1
 	}
 	rd := bufio.NewReader(stdout)
 	line, err := rd.ReadString('\n')
 	if err != nil || !strings.HasPrefix(line, "URL ") {
-		fmt.Fprintln(os.Stderr, "Le moteur n'a pas démarré (mot de passe administrateur refusé ?)")
+		fmt.Fprintln(os.Stderr, i18n.T("Le moteur n'a pas démarré (mot de passe administrateur refusé ?)"))
 		engineCmd.Wait()
 		return 1
 	}
@@ -625,7 +631,7 @@ func runGUI(args []string) int {
 		wc.Env = windowEnv(os.Environ())
 		wc.Stderr = os.Stderr
 		if err := wc.Start(); err != nil {
-			fmt.Fprintln(os.Stderr, "Fenêtre dédiée impossible à ouvrir :", err)
+			fmt.Fprintln(os.Stderr, i18n.T("Fenêtre dédiée impossible à ouvrir :"), err)
 			browser = true
 		} else {
 			exited := make(chan struct{})
@@ -640,7 +646,7 @@ func runGUI(args []string) int {
 				// Fenêtre restée vide (moteur d'affichage bloqué par la
 				// sécurité du système, pilote graphique…) : on bascule
 				// dans le navigateur, sans perdre la session.
-				fmt.Fprintln(os.Stderr, "La fenêtre dédiée ne s'affiche pas : ouverture de Bernard dans le navigateur.")
+				fmt.Fprintln(os.Stderr, i18n.T("La fenêtre dédiée ne s'affiche pas : ouverture de Bernard dans le navigateur."))
 				wc.Process.Kill()
 				<-exited
 				browser = true
@@ -650,10 +656,10 @@ func runGUI(args []string) int {
 	}
 	if window == "" || browser {
 		if window == "" {
-			fmt.Println("Fenêtre dédiée absente : ouverture dans le navigateur.")
+			fmt.Println(i18n.T("Fenêtre dédiée absente : ouverture dans le navigateur."))
 		}
 		exec.Command("xdg-open", url).Start()
-		fmt.Println("Fermez Bernard depuis la fenêtre, ou ici avec Ctrl+C.")
+		fmt.Println(i18n.T("Fermez Bernard depuis la fenêtre, ou ici avec Ctrl+C."))
 	}
 	engineCmd.Wait()
 	return 0
@@ -682,7 +688,7 @@ func browserRemembered() bool {
 func rememberBrowser() {
 	if p := browserMarker(); p != "" && os.Getuid() != 0 {
 		os.MkdirAll(filepath.Dir(p), 0o755)
-		os.WriteFile(p, []byte("La fenêtre dédiée de Bernard ne s'affiche pas sur cet ordinateur : Bernard s'ouvre dans le navigateur.\nSupprimez ce fichier pour réessayer la fenêtre.\n"), 0o644)
+		os.WriteFile(p, []byte(i18n.T("La fenêtre dédiée de Bernard ne s'affiche pas sur cet ordinateur : Bernard s'ouvre dans le navigateur.\nSupprimez ce fichier pour réessayer la fenêtre.\n")), 0o644)
 	}
 }
 

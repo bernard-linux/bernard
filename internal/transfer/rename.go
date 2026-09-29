@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"syscall"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // renameNoReplace renomme oldpath en newpath en échouant avec os.ErrExist si
@@ -41,7 +43,7 @@ func renameNoReplace(oldpath, newpath string) error {
 	return os.Rename(oldpath, newpath)
 }
 
-var errUnsupported = errors.New("opération non prise en charge")
+var errUnsupported = i18n.NewError("opération non prise en charge")
 
 func linkUnsupported(err error) bool {
 	var le *os.LinkError

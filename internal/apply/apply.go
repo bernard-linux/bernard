@@ -10,9 +10,9 @@ package apply
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/bernard-linux/bernard/internal/engine"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
@@ -43,9 +43,10 @@ type Report struct {
 	Failed       map[string]string `json:"failed,omitempty"` // étiquette → raison
 }
 
-func (a *Applier) log(format string, v ...any) {
+// log transmet une ligne, déjà traduite, à l'interface.
+func (a *Applier) log(msg string) {
 	if a.Log != nil {
-		a.Log(fmt.Sprintf(format, v...))
+		a.Log(msg)
 	}
 }
 
@@ -91,7 +92,7 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 			spec.PasswordHash = h
 		} else {
 			if a.AskPassword == nil {
-				return rep, fmt.Errorf("mot de passe requis pour %s", u.Login)
+				return rep, i18n.Errorf("mot de passe requis pour %s", u.Login)
 			}
 			pw, err := a.AskPassword(u.Login)
 			if err != nil {
@@ -99,7 +100,7 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 			}
 			spec.Password = pw
 		}
-		a.log("Création du compte %s…", u.Login)
+		a.log(i18n.Tf("Création du compte %s…", u.Login))
 		groups, err := a.Sys.CreateUser(ctx, spec)
 		if a.Sys.UserExists(ctx, u.Login) {
 			// Journalisé dès qu'il existe, même si une étape suivante a
@@ -109,11 +110,11 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 			}
 		}
 		if err != nil {
-			return rep, fmt.Errorf("compte %s : %w", u.Login, err)
+			return rep, i18n.Errorf("compte %s : %w", u.Login, err)
 		}
 		rep.UsersCreated = append(rep.UsersCreated, u.Login)
 		if len(groups) > 0 {
-			a.log("  groupes : %v", groups)
+			a.log(i18n.Tf("  groupes : %v", groups))
 		}
 	}
 
@@ -138,11 +139,11 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 
 	added := a.addRepos(p, inv, rep)
 	if len(aptPkgs) > 0 || needFlatpak || len(added) > 0 {
-		a.log("Mise à jour de la liste des paquets…")
+		a.log(i18n.T("Mise à jour de la liste des paquets…"))
 		a.aptUpdateChecked(ctx, added, rep)
 	}
 	if len(aptPkgs) > 0 {
-		a.log("Installation de %d applications depuis les dépôts…", len(aptPkgs))
+		a.log(i18n.Tf("Installation de %d %s depuis les dépôts…", len(aptPkgs), i18n.Plural(int64(len(aptPkgs)), "application", "applications")))
 		added, failed := a.Sys.AptInstall(ctx, aptPkgs)
 		for _, pkg := range added {
 			if err := a.record(journal.SysAptAdded, pkg); err != nil {
@@ -157,7 +158,7 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 
 	if len(flatpaks) > 0 {
 		if needFlatpak {
-			a.log("Mise en place de Flatpak et Flathub…")
+			a.log(i18n.T("Mise en place de Flatpak et Flathub…"))
 			addedFP, addedRemote, err := a.Sys.FlatpakSetup(ctx)
 			if addedFP {
 				a.record(journal.SysAptAdded, "flatpak")
@@ -167,7 +168,7 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 			}
 			if err != nil {
 				for _, id := range flatpaks {
-					rep.Failed[id] = "Flatpak indisponible : " + err.Error()
+					rep.Failed[id] = i18n.Tf("Flatpak indisponible : %v", err)
 				}
 				flatpaks = nil
 			}
@@ -177,7 +178,7 @@ func (a *Applier) System(ctx context.Context, p *plan.Plan, inv *inventory.Inven
 			if present[id] || a.did(journal.SysFlatpakAdded, id) {
 				continue
 			}
-			a.log("Installation de %s (Flathub)…", id)
+			a.log(i18n.Tf("Installation de %s (Flathub)…", id))
 			if err := a.Sys.FlatpakInstall(ctx, id); err != nil {
 				rep.Failed[id] = err.Error()
 				continue
@@ -211,9 +212,9 @@ func (a *Applier) removeApps(ctx context.Context, p *plan.Plan, rep *Report) {
 				continue
 			}
 			origin := a.Sys.FlatpakOrigin(ctx, act.Package)
-			a.log("Retrait de %s…", act.Label)
+			a.log(i18n.Tf("Retrait de %s…", act.Label))
 			if err := a.Sys.FlatpakUninstall(ctx, act.Package); err != nil {
-				rep.Failed[act.Label] = "retrait : " + err.Error()
+				rep.Failed[act.Label] = i18n.Tf("retrait : %v", err)
 				continue
 			}
 			a.Journal.Append(journal.Record{T: journal.RecSys, Op: journal.SysFlatpakRemoved, Name: act.Package, Key: origin})
@@ -224,7 +225,8 @@ func (a *Applier) removeApps(ctx context.Context, p *plan.Plan, rep *Report) {
 	if len(apt) == 0 {
 		return
 	}
-	a.log("Retrait de %d applications absentes de l'ancien ordinateur…", len(apt))
+	a.log(i18n.Tf("Retrait de %d %s…", len(apt), i18n.Plural(int64(len(apt)),
+		"application absente de l'ancien ordinateur", "applications absentes de l'ancien ordinateur")))
 	removed, err := a.Sys.AptRemoveApps(ctx, apt)
 	for _, pkg := range removed {
 		a.record(journal.SysAptRemoved, pkg)
@@ -239,7 +241,7 @@ func (a *Applier) removeApps(ctx context.Context, p *plan.Plan, rep *Report) {
 		}
 		for _, pkg := range apt {
 			if !gone[pkg] {
-				rep.Failed[labels[pkg]] = "retrait : " + err.Error()
+				rep.Failed[labels[pkg]] = i18n.Tf("retrait : %v", err)
 			}
 		}
 	}
@@ -275,7 +277,7 @@ func CopyData(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *invent
 		}
 		uid, gid, home, err := system.Owner(act.Login)
 		if err != nil {
-			return out, replaced, fmt.Errorf("compte %s introuvable sur la cible : %w", act.Login, err)
+			return out, replaced, i18n.Errorf("compte %s introuvable sur la cible : %w", act.Login, err)
 		}
 		if created[act.Login] {
 			settings.ClearPristineSkeleton(home, "/etc/skel")
@@ -298,7 +300,7 @@ func CopyData(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *invent
 				replaced = append(replaced, act.Login+" : "+rel)
 			}
 			if err != nil {
-				return out, replaced, fmt.Errorf("mise en place des profils de %s : %w", act.Login, err)
+				return out, replaced, i18n.Errorf("mise en place des profils de %s : %w", act.Login, err)
 			}
 		}
 	}
@@ -343,14 +345,14 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 		case plan.OpSettings:
 			_, _, home, err := system.Owner(act.Login)
 			if err != nil {
-				note("Réglages de "+act.Login, err)
+				note(i18n.Tf("Réglages de %s", act.Login), err)
 				continue
 			}
 			if act.Reason != plan.ReasonDesktopMismatch && !a.did(journal.SysDconfApplied, act.Login) {
 				hw := settings.Hardware{KeepKeyboard: keepKeyboard(p, act.Login), TargetKeyboard: p.Target.Keyboard}
 				d := settings.Translate(settings.ParseDump(ex.Dconf[act.Login]), ex.Desktop, p.Target.Desktop, settings.ThemeExists(home), hw)
 				if len(d) == 0 {
-					note("Réglages du bureau de "+act.Login, fmt.Errorf("%w : aucun réglage lu sur l'ancien ordinateur", settings.ErrSkipped))
+					note(i18n.Tf("Réglages du bureau de %s", act.Login), i18n.Errorf("%w : aucun réglage lu sur l'ancien ordinateur", settings.ErrSkipped))
 				} else {
 					backup, err := sa.ApplyDconf(ctx, act.Login, home, d, hw.Resets()...)
 					if backup != "" {
@@ -359,7 +361,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 						}
 						a.State.Sys = append(a.State.Sys, journal.Record{Op: journal.SysDconfApplied, Name: act.Login, Dst: backup})
 					}
-					note("Réglages du bureau de "+act.Login, err)
+					note(i18n.Tf("Réglages du bureau de %s", act.Login), err)
 				}
 			}
 			if c := ex.Crontabs[act.Login]; c != "" && !a.did(journal.SysCrontabSet, act.Login) {
@@ -369,13 +371,13 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 						return rep, rerr
 					}
 				}
-				note("Tâches planifiées de "+act.Login, err)
+				note(i18n.Tf("Tâches planifiées de %s", act.Login), err)
 			}
 
 		case plan.OpImportWifi, plan.OpImportVPN:
-			label := "Wi-Fi « " + act.Label + " »"
+			label := i18n.Tf("Wi-Fi « %s »", act.Label)
 			if act.Op == plan.OpImportVPN {
-				label = "VPN « " + act.Label + " »"
+				label = i18n.Tf("VPN « %s »", act.Label)
 			}
 			var conn *settings.NMConnection
 			for i, w := range ex.Wifi {
@@ -384,7 +386,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				}
 			}
 			if conn == nil {
-				note(label, fmt.Errorf("%w : mot de passe non lu (agent sans droits administrateur ?)", settings.ErrSkipped))
+				note(label, i18n.Errorf("%w : mot de passe non lu (agent sans droits administrateur ?)", settings.ErrSkipped))
 				continue
 			}
 			if a.didLabel(journal.SysWifiAdded, act.Label) {
@@ -394,7 +396,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				// Greffon VPN absent de la cible : installé depuis le dépôt de
 				// la distribution (sinon la connexion resterait inutilisable).
 				if _, failed := a.Sys.AptInstall(ctx, []string{pkg}); failed[pkg] != nil {
-					note(label+" : module "+pkg, failed[pkg])
+					note(i18n.Tf("%s : module %s", label, pkg), failed[pkg])
 				}
 			}
 			path, err := sa.InstallWifi(ctx, *conn, userExists)
@@ -407,7 +409,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 			note(label, err)
 
 		case plan.OpAutoLoginOff:
-			label := "Ouverture automatique de la session « " + act.Label + " » désactivée"
+			label := i18n.Tf("Ouverture automatique de la session « %s » désactivée", act.Label)
 			if a.didAny(journal.SysAutoLoginOff) {
 				continue
 			}
@@ -421,7 +423,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 			note(label, err)
 
 		case plan.OpAddPrinter:
-			label := "Imprimante " + act.Label
+			label := i18n.Tf("Imprimante %s", act.Label)
 			var pr *settings.Printer
 			for i := range ex.Printers {
 				if ex.Printers[i].Name == act.Label {
@@ -429,7 +431,7 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				}
 			}
 			if pr == nil {
-				note(label, fmt.Errorf("%w : adresse de l'imprimante non lue", settings.ErrSkipped))
+				note(label, i18n.Errorf("%w : adresse de l'imprimante non lue", settings.ErrSkipped))
 				continue
 			}
 			if a.did(journal.SysPrinterAdded, pr.Name) {
@@ -485,14 +487,14 @@ type UndoReport struct {
 // que Bernard y a copié).
 func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *settings.Applier) *UndoReport {
 	rep := &UndoReport{}
-	fail := func(what string, err error) { rep.Errors = append(rep.Errors, what+" : "+err.Error()) }
+	fail := func(what string, err error) { rep.Errors = append(rep.Errors, i18n.Tf("%s : %v", what, err)) }
 	var apt, aptBack []string
 	for i := len(st.Sys) - 1; i >= 0; i-- {
 		r := st.Sys[i]
 		switch r.Op {
 		case journal.SysFstab:
 			if err := undoFstab(ctx, r); err != nil {
-				fail("disque "+r.Key, err)
+				fail(i18n.Tf("disque %s", r.Key), err)
 			}
 		case journal.SysRepoAdded, journal.SysKeyAdded:
 			if err := removeAdded(r.Name); err != nil {
@@ -500,7 +502,7 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 			}
 		case journal.SysAutoLoginOff:
 			if err := settings.RestoreFile(r.Name, r.Dst); err != nil {
-				fail("ouverture automatique de session", err)
+				fail(i18n.T("ouverture automatique de session"), err)
 			}
 		case journal.SysAptRemoved:
 			aptBack = append(aptBack, r.Name)
@@ -512,24 +514,24 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 			}
 		case journal.SysWifiAdded:
 			if err := sa.RemoveWifi(ctx, r.Dst); err != nil {
-				fail("Wi-Fi "+r.Name, err)
+				fail(i18n.Tf("Wi-Fi %s", r.Name), err)
 			} else {
-				rep.Removed = append(rep.Removed, "Wi-Fi "+r.Name)
+				rep.Removed = append(rep.Removed, i18n.Tf("Wi-Fi %s", r.Name))
 			}
 		case journal.SysPrinterAdded:
 			if err := sa.RemovePrinter(ctx, r.Name); err != nil {
-				fail("imprimante "+r.Name, err)
+				fail(i18n.Tf("imprimante %s", r.Name), err)
 			} else {
-				rep.Removed = append(rep.Removed, "imprimante "+r.Name)
+				rep.Removed = append(rep.Removed, i18n.Tf("imprimante %s", r.Name))
 			}
 		case journal.SysCrontabSet:
 			if err := sa.RemoveCrontab(ctx, r.Name); err != nil {
-				fail("tâches planifiées de "+r.Name, err)
+				fail(i18n.Tf("tâches planifiées de %s", r.Name), err)
 			}
 		case journal.SysDconfApplied:
 			if _, _, home, err := system.Owner(r.Name); err == nil {
 				if err := sa.RestoreDconf(ctx, r.Name, home, r.Dst); err != nil {
-					fail("réglages de "+r.Name, err)
+					fail(i18n.Tf("réglages de %s", r.Name), err)
 				}
 			}
 		case journal.SysFlatpakAdded:
@@ -551,12 +553,12 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 		back, failed := sys.AptInstall(ctx, aptBack)
 		rep.Reinstalled = append(rep.Reinstalled, back...)
 		for pkg, err := range failed {
-			fail("réinstallation de "+pkg, err)
+			fail(i18n.Tf("réinstallation de %s", pkg), err)
 		}
 	}
 	if len(apt) > 0 {
 		if err := sys.AptRemove(ctx, apt); err != nil {
-			fail("paquets apt", err)
+			fail(i18n.T("paquets apt"), err)
 		} else {
 			rep.Removed = append(rep.Removed, apt...)
 		}

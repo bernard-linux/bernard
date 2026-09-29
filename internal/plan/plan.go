@@ -14,6 +14,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/hardware"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/settings"
 )
@@ -222,7 +223,7 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 		// Introuvable ici, mais son dépôt sera ajouté : installable.
 		if a.Op == OpReview && a.Reason == ReasonNotInRepos && newRepos[app.Repo] != "" {
 			a.Op, a.Via, a.Package, a.Fidelity, a.Selected, a.Reason = OpInstall, "apt", app.Name, FidelityFull, true, ""
-			a.Suggestion = "dépôt " + newRepos[app.Repo]
+			a.Suggestion = i18n.Tf("dépôt %s", newRepos[app.Repo])
 		}
 		if a.Op == OpInstall && a.Via == "flatpak" {
 			needFlatpak = true
@@ -230,7 +231,7 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 		installs = append(installs, a)
 	}
 	if needFlatpak && !t.FlatpakReady {
-		add(Action{Op: OpSetupFlatpak, Label: "Flatpak et Flathub", Fidelity: FidelityFull, Selected: true})
+		add(Action{Op: OpSetupFlatpak, Label: i18n.T("Flatpak et Flathub"), Fidelity: FidelityFull, Selected: true})
 	}
 	for _, a := range installs {
 		add(a)
@@ -393,7 +394,7 @@ func diskAction(it inventory.SystemItem, ds inventory.DataSet, inv *inventory.In
 		Reason: it.Kind, Suggestion: it.Advice, Fidelity: FidelityNone}
 	if it.UUID != "" && t.UUIDs[it.UUID] {
 		a.Op, a.To, a.Fidelity, a.Selected = OpAttachDisk, AttachPoint(it.Paths[0]), FidelityFull, true
-		a.Note = "Ce disque est branché sur ce PC : il sera monté tel quel dans " + a.To + ", à chaque démarrage, sans rien copier."
+		a.Note = i18n.Tf("Ce disque est branché sur ce PC : il sera monté tel quel dans %s, à chaque démarrage, sans rien copier.", a.To)
 		return a
 	}
 	if ds.ID == "" {
@@ -416,9 +417,9 @@ func diskAction(it inventory.SystemItem, ds inventory.DataSet, inv *inventory.In
 	}
 	a.Fidelity, a.Package = FidelityFull, ds.ID
 	a.Selected = it.Advice == inventory.AdviceCopy
-	a.Note = "Copié dans " + a.To + "."
+	a.Note = i18n.Tf("Copié dans %s.", a.To)
 	if it.Kind == inventory.SysBackup {
-		a.Note += " Copie déconseillée si les données qu'il protège sont déjà migrées."
+		a.Note += " " + i18n.T("Copie déconseillée si les données qu'il protège sont déjà migrées.")
 	}
 	return a
 }
@@ -432,11 +433,11 @@ func sameRelease(src inventory.Source, t Target) bool {
 func serviceNote(it inventory.SystemItem, src inventory.Source, t Target) string {
 	switch {
 	case it.Kind == inventory.SysDatabase && !sameRelease(src, t):
-		return "Versions du système différentes : copie directe risquée, export et import prévus dans une prochaine version."
+		return i18n.T("Versions du système différentes : copie directe risquée, export et import prévus dans une prochaine version.")
 	case it.Kind == inventory.SysVM:
-		return "Éteignez les machines virtuelles avant la migration : leurs disques sont copiés tels quels, fichiers creux compris."
+		return i18n.T("Éteignez les machines virtuelles avant la migration : leurs disques sont copiés tels quels, fichiers creux compris.")
 	case it.Service != "":
-		return "Service arrêté quelques minutes sur les deux ordinateurs pendant la copie, puis relancé."
+		return i18n.T("Service arrêté quelques minutes sur les deux ordinateurs pendant la copie, puis relancé.")
 	}
 	return ""
 }

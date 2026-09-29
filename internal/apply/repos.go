@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
@@ -49,7 +50,7 @@ func (a *Applier) addRepos(p *plan.Plan, inv *inventory.Inventory, rep *Report) 
 		for _, u := range src.URIs {
 			ar.hosts = append(ar.hosts, aptrepo.Host(u))
 		}
-		fail := func(err error) { rep.Failed["Dépôt "+act.Label] = err.Error() }
+		fail := func(err error) { rep.Failed[i18n.Tf("Dépôt %s", act.Label)] = err.Error() }
 		ok = true
 		for path, b64 := range src.Keys {
 			if !aptrepo.KeyPathOK(path) {
@@ -97,7 +98,7 @@ func (a *Applier) addRepos(p *plan.Plan, inv *inventory.Inventory, rep *Report) 
 		}
 		ar.file = dst
 		out = append(out, ar)
-		a.log("Dépôt ajouté : %s", act.Label)
+		a.log(i18n.Tf("Dépôt ajouté : %s", act.Label))
 	}
 	return out
 }
@@ -138,7 +139,7 @@ func (a *Applier) aptUpdateChecked(ctx context.Context, added []addedRepo, rep *
 		Env: []string{"DEBIAN_FRONTEND=noninteractive"}})
 	if len(added) == 0 {
 		if err != nil {
-			a.log("  attention : %v", err)
+			a.log(i18n.Tf("  attention : %v", err))
 		}
 		return
 	}
@@ -151,7 +152,7 @@ func (a *Applier) aptUpdateChecked(ctx context.Context, added []addedRepo, rep *
 		for _, k := range r.keys {
 			os.Remove(k)
 		}
-		rep.Failed["Dépôt "+r.label] = "injoignable depuis cet ordinateur (version du système non prise en charge ?) : retiré"
+		rep.Failed[i18n.Tf("Dépôt %s", r.label)] = i18n.T("injoignable depuis cet ordinateur (version du système non prise en charge ?) : retiré")
 		removed = true
 	}
 	if removed {

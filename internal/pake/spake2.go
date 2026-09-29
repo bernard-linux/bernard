@@ -19,6 +19,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/big"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Rôles des deux participants.
@@ -28,7 +30,7 @@ const (
 )
 
 // ErrBadCode signale un code erroné (ou une interception active).
-var ErrBadCode = errors.New("code d'appairage incorrect")
+var ErrBadCode = i18n.NewError("code d'appairage incorrect")
 
 var (
 	curve  = elliptic.P256()
@@ -63,7 +65,7 @@ type State struct {
 // Start commence l'échange et renvoie le message à envoyer à l'autre partie.
 func Start(role, code string, binding []byte) (*State, []byte, error) {
 	if role != RoleTarget && role != RoleSource {
-		return nil, nil, errors.New("rôle inconnu")
+		return nil, nil, errors.New(i18n.T("rôle inconnu"))
 	}
 	w := passwordScalar(code, binding)
 	x, err := randomScalar()
@@ -94,7 +96,7 @@ type Keys struct {
 func (s *State) Finish(peer []byte) (*Keys, error) {
 	px, py := elliptic.Unmarshal(curve, peer)
 	if px == nil {
-		return nil, errors.New("point invalide reçu")
+		return nil, errors.New(i18n.T("point invalide reçu"))
 	}
 	// Retirer w·(M ou N) du point reçu, puis multiplier par notre secret.
 	ox, oy := nX, nY
@@ -105,7 +107,7 @@ func (s *State) Finish(peer []byte) (*Keys, error) {
 	negY := new(big.Int).Sub(params.P, wy)
 	tx, ty := curve.Add(px, py, wx, negY)
 	if tx.Sign() == 0 && ty.Sign() == 0 {
-		return nil, errors.New("point invalide reçu")
+		return nil, errors.New(i18n.T("point invalide reçu"))
 	}
 	kx, ky := curve.ScalarMult(tx, ty, s.x.Bytes())
 	k := elliptic.Marshal(curve, kx, ky)

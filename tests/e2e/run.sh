@@ -14,6 +14,11 @@ BIN=${1:-bin}
 SRC=$(mktemp -d /tmp/bernard-e2e-src.XXXX)
 LOG=$(mktemp /tmp/bernard-e2e-log.XXXX)
 PORT=51599
+# Nom du bilan selon la langue du système (Bernard parle français ou anglais).
+case "${LANGUAGE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-fr}}}}" in
+  fr*|"") BILAN="Bilan de la migration (Bernard).html";;
+  *)      BILAN="Migration report (Bernard).html";;
+esac
 FAILS=0
 ok()   { echo "  ok    $*"; }
 bad()  { echo "  ÉCHEC $*"; FAILS=$((FAILS+1)); }
@@ -95,7 +100,7 @@ CODE=""
 for _ in $(seq 1 50); do
   read -t 1 -r line <&3 || continue
   echo "$line" >> $LOG
-  case "$line" in *"Code d'appairage"*) CODE=$(echo "$line" | sed 's/.*: //; s/ //g'); break;; esac
+  case "$line" in *"Code d'appairage"*|*"Pairing code"*) CODE=$(echo "$line" | sed 's/.*: //; s/ //g'); break;; esac
 done
 [ -n "$CODE" ] || { echo "Pas de code affiché"; cat $LOG; exit 1; }
 # Mot de passe de e2ebob (compte verrouillé à la source) : saisi deux fois.
@@ -121,7 +126,7 @@ check "tâches planifiées reprises"                bash -c "crontab -u e2ealice
 check "Wi-Fi repris en 600, sans nom d'interface" bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-Maison*); test \$(stat -c %a \$f) = 600 && ! grep -q interface-name \$f && grep -q psk=secret-e2e \$f"
 check "VPN WireGuard repris avec son interface"  bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-VPN*); grep -q interface-name=wge2e \$f && grep -q cle-privee-e2e \$f"
 check "lien dur recréé (même fichier)"           test "$(stat -c %i /home/e2ealice/Images/album.tar)" = "$(stat -c %i /home/e2ealice/Sauvegarde/album.tar)"
-check "bilan lisible dans Documents"              bash -c "grep -q 'Bilan de la migration' '/home/e2ealice/Documents/Bilan de la migration (Bernard).html' && test \$(stat -c %U '/home/e2ealice/Documents/Bilan de la migration (Bernard).html') = e2ealice"
+check "bilan lisible dans Documents"              bash -c "grep -q '<h1>' \"/home/e2ealice/Documents/$BILAN\" && test \$(stat -c %U \"/home/e2ealice/Documents/$BILAN\") = e2ealice"
 check "/opt : logiciel copié, exécutable"        test -x /opt/e2eappli/bin/outil
 check "/opt : fichier creux resté creux"          bash -c "cmp $SRC/opt/e2eappli/disque.img /opt/e2eappli/disque.img && test \$(du -k /opt/e2eappli/disque.img | cut -f1) -lt 10240"
 check "site web copié, propriétaire www-data"     test "$(stat -c %u /var/www/html/e2esite/index.php)" = 33
@@ -138,7 +143,7 @@ JOURNAL=$(ls /var/lib/bernard/*/journal.jsonl | head -1)
 $BIN/bernard undo --journal "$JOURNAL" >> $LOG 2>&1
 check "comptes supprimés"                         bash -c "! getent passwd e2ealice && ! getent passwd e2ebob"
 check "fichiers copiés retirés"                   test ! -e /home/e2ealice/Images/album.tar
-check "bilan retiré"                              test ! -e "/home/e2ealice/Documents/Bilan de la migration (Bernard).html"
+check "bilan retiré"                              test ! -e "/home/e2ealice/Documents/$BILAN"
 check "Wi-Fi retiré"                              bash -c "! ls /etc/NetworkManager/system-connections/bernard-E2E* 2>/dev/null"
 check "/opt : logiciel retiré"                    test ! -e /opt/e2eappli/bin/outil
 check "/etc : réglage ajouté retiré"              test ! -e /etc/e2e-appli.conf

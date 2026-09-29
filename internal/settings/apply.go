@@ -4,20 +4,21 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/transfer"
 )
 
 // ErrSkipped signale un réglage volontairement non appliqué (déjà présent,
-// ou à faire à la main) ; ce n'est pas une panne.
-var ErrSkipped = errors.New("non appliqué")
+// ou à faire à la main) ; ce n'est pas une panne. Le bilan et l'interface
+// retirent le préfixe « non appliqué : » (« not applied : ») des raisons.
+var ErrSkipped = i18n.NewError("non appliqué")
 
 var loginRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
@@ -38,7 +39,7 @@ func New(stateDir string) *Applier {
 // l'utilisateur n'est pas connecté).
 func (a *Applier) asUser(ctx context.Context, login, home, stdin string, args ...string) (string, error) {
 	if !loginRe.MatchString(login) {
-		return "", fmt.Errorf("identifiant refusé : %q", login)
+		return "", i18n.Errorf("identifiant refusé : %q", login)
 	}
 	full := append([]string{"-u", login, "--", "env", "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
 		"dbus-run-session", "--"}, args...)
@@ -54,7 +55,7 @@ func (a *Applier) ApplyDconf(ctx context.Context, login, home string, d Dump, re
 	}
 	current, err := a.asUser(ctx, login, home, "", "dconf", "dump", "/")
 	if err != nil {
-		return "", fmt.Errorf("lecture des réglages actuels de %s : %w", login, err)
+		return "", i18n.Errorf("lecture des réglages actuels de %s : %w", login, err)
 	}
 	backup := filepath.Join(a.StateDir, "dconf-"+login+".ini")
 	if err := os.MkdirAll(a.StateDir, 0o700); err != nil {
@@ -176,13 +177,13 @@ func SanitizeWifi(content string, userExists func(string) bool) (string, string,
 		out = append(out, line)
 	}
 	if ConnType(typ) == "" {
-		return "", "", "", fmt.Errorf("%w : pas une connexion Wi-Fi ni VPN", ErrSkipped)
+		return "", "", "", i18n.Errorf("%w : pas une connexion Wi-Fi ni VPN", ErrSkipped)
 	}
 	if iface >= 0 && ConnType(typ) == "wifi" {
 		out = append(out[:iface], out[iface+1:]...)
 	}
 	if id == "" || !regexp.MustCompile(`^[0-9a-fA-F-]{36}$`).MatchString(uuid) {
-		return "", "", "", errors.New("connexion réseau incomplète")
+		return "", "", "", errors.New(i18n.T("connexion réseau incomplète"))
 	}
 	return strings.Join(out, "\n") + "\n", id, uuid, nil
 }
@@ -208,7 +209,7 @@ func (a *Applier) InstallWifi(ctx context.Context, c NMConnection, userExists fu
 	if out, err := a.Exec(ctx, sysexec.Cmd{Name: "nmcli", Args: []string{"-t", "-f", "UUID", "connection", "show"}}); err == nil {
 		for _, l := range sysexec.Lines(out) {
 			if l == uuid {
-				return "", fmt.Errorf("%w : « %s » existe déjà", ErrSkipped, id)
+				return "", i18n.Errorf("%w : « %s » existe déjà", ErrSkipped, id)
 			}
 		}
 	}
@@ -234,7 +235,7 @@ func (a *Applier) InstallWifi(ctx context.Context, c NMConnection, userExists fu
 // RemoveWifi retire une connexion ajoutée par Bernard.
 func (a *Applier) RemoveWifi(ctx context.Context, path string) error {
 	if filepath.Dir(path) != a.NMDir || !strings.HasPrefix(filepath.Base(path), "bernard-") {
-		return fmt.Errorf("fichier refusé : %s", path)
+		return i18n.Errorf("fichier refusé : %s", path)
 	}
 	if err := os.Remove(path); err != nil {
 		return err
@@ -249,13 +250,13 @@ func (a *Applier) RemoveWifi(ctx context.Context, path string) error {
 // déjà sur la cible.
 func (a *Applier) InstallCrontab(ctx context.Context, login, content string) error {
 	if !loginRe.MatchString(login) {
-		return fmt.Errorf("identifiant refusé : %q", login)
+		return i18n.Errorf("identifiant refusé : %q", login)
 	}
 	if strings.TrimSpace(content) == "" {
 		return ErrSkipped
 	}
 	if out, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-l"}}); err == nil && strings.TrimSpace(out) != "" {
-		return fmt.Errorf("%w : %s a déjà des tâches planifiées ici", ErrSkipped, login)
+		return i18n.Errorf("%w : %s a déjà des tâches planifiées ici", ErrSkipped, login)
 	}
 	_, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-"}, Stdin: content})
 	return err
@@ -264,7 +265,7 @@ func (a *Applier) InstallCrontab(ctx context.Context, login, content string) err
 // RemoveCrontab retire les tâches reprises par Bernard.
 func (a *Applier) RemoveCrontab(ctx context.Context, login string) error {
 	if !loginRe.MatchString(login) {
-		return fmt.Errorf("identifiant refusé : %q", login)
+		return i18n.Errorf("identifiant refusé : %q", login)
 	}
 	_, err := a.Exec(ctx, sysexec.Cmd{Name: "crontab", Args: []string{"-u", login, "-r"}})
 	return err
@@ -281,7 +282,7 @@ var networkSchemes = []string{"ipp://", "ipps://", "dnssd://", "http://", "https
 // imprimantes USB ou à pilote propriétaire restent à faire à la main.
 func (a *Applier) AddPrinter(ctx context.Context, p Printer) error {
 	if !printerRe.MatchString(p.Name) {
-		return fmt.Errorf("nom d'imprimante refusé : %q", p.Name)
+		return i18n.Errorf("nom d'imprimante refusé : %q", p.Name)
 	}
 	network := false
 	for _, s := range networkSchemes {
@@ -290,10 +291,10 @@ func (a *Applier) AddPrinter(ctx context.Context, p Printer) error {
 		}
 	}
 	if !network || strings.ContainsAny(p.URI, " \n") {
-		return fmt.Errorf("%w : %s n'est pas une imprimante réseau, à installer depuis les réglages d'impression", ErrSkipped, p.Name)
+		return i18n.Errorf("%w : %s n'est pas une imprimante réseau, à installer depuis les réglages d'impression", ErrSkipped, p.Name)
 	}
 	if _, err := a.Exec(ctx, sysexec.Cmd{Name: "lpstat", Args: []string{"-p", p.Name}}); err == nil {
-		return fmt.Errorf("%w : %s existe déjà", ErrSkipped, p.Name)
+		return i18n.Errorf("%w : %s existe déjà", ErrSkipped, p.Name)
 	}
 	if _, err := a.Exec(ctx, sysexec.Cmd{Name: "lpadmin", Args: []string{"-p", p.Name, "-E", "-v", p.URI, "-m", "everywhere"}}); err != nil {
 		return err
@@ -307,7 +308,7 @@ func (a *Applier) AddPrinter(ctx context.Context, p Printer) error {
 // RemovePrinter retire une imprimante ajoutée par Bernard.
 func (a *Applier) RemovePrinter(ctx context.Context, name string) error {
 	if !printerRe.MatchString(name) {
-		return fmt.Errorf("nom d'imprimante refusé : %q", name)
+		return i18n.Errorf("nom d'imprimante refusé : %q", name)
 	}
 	_, err := a.Exec(ctx, sysexec.Cmd{Name: "lpadmin", Args: []string{"-x", name}})
 	return err

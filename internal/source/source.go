@@ -9,8 +9,6 @@ package source
 import (
 	"context"
 	"encoding/base64"
-	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -23,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
 
@@ -87,7 +86,7 @@ type Source interface {
 }
 
 // ErrOutsideRoot signale une tentative d'accès hors d'un jeu de données.
-var ErrOutsideRoot = errors.New("chemin refusé : hors des dossiers à migrer")
+var ErrOutsideRoot = i18n.NewError("chemin refusé : hors des dossiers à migrer")
 
 // Excluded indique si rel (séparateurs '/') correspond à un motif d'exclusion.
 // Un motif exclut aussi tout ce qui se trouve dessous.
@@ -323,7 +322,7 @@ func OpenRegular(root, rel string) (*os.File, os.FileInfo, error) {
 		return nil, nil, err
 	}
 	if !before.Mode().IsRegular() {
-		return nil, nil, fmt.Errorf("%s : pas un fichier ordinaire", rel)
+		return nil, nil, i18n.Errorf("%s : pas un fichier ordinaire", rel)
 	}
 	f, err := os.Open(full)
 	if err != nil {
@@ -332,7 +331,7 @@ func OpenRegular(root, rel string) (*os.File, os.FileInfo, error) {
 	after, err := f.Stat()
 	if err != nil || !os.SameFile(before, after) {
 		f.Close()
-		return nil, nil, fmt.Errorf("%s : fichier remplacé pendant l'ouverture", rel)
+		return nil, nil, i18n.Errorf("%s : fichier remplacé pendant l'ouverture", rel)
 	}
 	return f, after, nil
 }
@@ -345,7 +344,7 @@ type FileError struct{ Rel, Msg string }
 
 func (e *FileError) Error() string {
 	if e.Rel == "" {
-		return "source : " + e.Msg
+		return i18n.Tf("source : %s", i18n.T(e.Msg))
 	}
-	return "source : " + e.Rel + " : " + e.Msg
+	return i18n.Tf("source : %s : %s", e.Rel, i18n.T(e.Msg))
 }

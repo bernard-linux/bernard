@@ -11,12 +11,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"sync"
 
 	"github.com/zeebo/blake3"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/source"
 	"github.com/bernard-linux/bernard/internal/wire"
@@ -60,7 +61,7 @@ func (s *Server) dataset(id string) (inventory.DataSet, error) {
 			return d, nil
 		}
 	}
-	return inventory.DataSet{}, fmt.Errorf("jeu de données inconnu : %q", id)
+	return inventory.DataSet{}, i18n.Errorf("jeu de données inconnu : %q", id)
 }
 
 // Serve traite les demandes jusqu'au message de fin ou à la coupure.
@@ -124,7 +125,7 @@ func (s *Server) Serve(ctx context.Context, conn io.ReadWriter) error {
 			}
 			return nil
 		default:
-			err = wire.WriteJSON(rw, wire.Msg{Type: wire.MsgError, Error: "demande inconnue : " + m.Type})
+			err = wire.WriteJSON(rw, wire.Msg{Type: wire.MsgError, Error: i18n.Tf("demande inconnue : %s", m.Type)})
 		}
 		if err != nil {
 			return err
@@ -134,11 +135,11 @@ func (s *Server) Serve(ctx context.Context, conn io.ReadWriter) error {
 
 func (s *Server) secrets(w io.Writer) error {
 	if s.Secrets == nil {
-		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: "mots de passe non disponibles"})
+		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: i18n.N("mots de passe non disponibles")})
 	}
 	m, err := s.Secrets()
 	if err != nil {
-		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: "mots de passe non lisibles (agent lancé sans droits administrateur ?)"})
+		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: i18n.N("mots de passe non lisibles (agent lancé sans droits administrateur ?)")})
 	}
 	b, _ := json.Marshal(m)
 	return wire.WriteJSON(w, wire.Msg{Type: wire.MsgSecrets, Body: b})
@@ -146,7 +147,7 @@ func (s *Server) secrets(w io.Writer) error {
 
 func (s *Server) extras(w io.Writer) error {
 	if s.Extras == nil {
-		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: "réglages non disponibles (agent lancé sans droits administrateur ?)"})
+		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: i18n.N("réglages non disponibles (agent lancé sans droits administrateur ?)")})
 	}
 	v, err := s.Extras()
 	if err != nil {
@@ -245,7 +246,7 @@ func (s *Server) get(w io.Writer, id, rel string, offset int64) error {
 	}
 	after, err := f.Stat()
 	if err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || offset+sent != info.Size() {
-		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Rel: rel, Error: "fichier modifié pendant l'envoi"})
+		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Rel: rel, Error: i18n.N("fichier modifié pendant l'envoi")})
 	}
 	if s.OnFile != nil {
 		s.OnFile(rel, sent)
@@ -330,7 +331,7 @@ func (c *Client) skipResponse() error {
 		}
 		return nil
 	}
-	return fmt.Errorf("protocole : message inattendu %q", m.Type)
+	return i18n.Errorf("protocole : message inattendu %q", m.Type)
 }
 
 func isFileErr(err error) bool {
@@ -355,7 +356,7 @@ func (c *Client) Inventory(ctx context.Context) (*inventory.Inventory, error) {
 		return nil, err
 	}
 	if m.Type != wire.MsgInventory {
-		return nil, &source.FileError{Msg: m.Error}
+		return nil, &source.FileError{Msg: i18n.T(m.Error)}
 	}
 	var inv inventory.Inventory
 	if err := json.Unmarshal(m.Body, &inv); err != nil {
@@ -383,13 +384,13 @@ func (c *Client) List(ctx context.Context, dataset string, fn func(source.Entry)
 		case wire.MsgDone:
 			return fnErr
 		case wire.MsgError:
-			return &source.FileError{Msg: m.Error}
+			return &source.FileError{Msg: i18n.T(m.Error)}
 		case wire.MsgEntry:
 			if fnErr != nil {
 				continue // on vide la liste pour garder le protocole synchronisé
 			}
 			if m.Error != "" {
-				fnErr = fn(source.Entry{Rel: m.Rel, Kind: source.KindUnreadable, Link: m.Error})
+				fnErr = fn(source.Entry{Rel: m.Rel, Kind: source.KindUnreadable, Link: i18n.T(m.Error)})
 				continue
 			}
 			var e source.Entry
@@ -398,7 +399,7 @@ func (c *Client) List(ctx context.Context, dataset string, fn func(source.Entry)
 			}
 			fnErr = fn(e)
 		default:
-			return fmt.Errorf("protocole : message inattendu %q", m.Type)
+			return i18n.Errorf("protocole : message inattendu %q", m.Type)
 		}
 	}
 }
@@ -411,7 +412,7 @@ func (c *Client) Secrets(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 	if m.Type != wire.MsgSecrets {
-		return nil, &source.FileError{Msg: m.Error}
+		return nil, &source.FileError{Msg: i18n.T(m.Error)}
 	}
 	out := map[string]string{}
 	return out, json.Unmarshal(m.Body, &out)
@@ -424,7 +425,7 @@ func (c *Client) Extras(ctx context.Context, out any) error {
 		return err
 	}
 	if m.Type != wire.MsgExtras {
-		return &source.FileError{Msg: m.Error}
+		return &source.FileError{Msg: i18n.T(m.Error)}
 	}
 	return json.Unmarshal(m.Body, out)
 }
@@ -480,17 +481,17 @@ func (c *Client) Get(ctx context.Context, dataset, rel string, offset int64) (so
 		return nil, err
 	}
 	if m.Type == wire.MsgError {
-		return nil, &source.FileError{Rel: rel, Msg: m.Error}
+		return nil, &source.FileError{Rel: rel, Msg: i18n.T(m.Error)}
 	}
 	if m.Type != wire.MsgFile {
-		return nil, fmt.Errorf("protocole : message inattendu %q", m.Type)
+		return nil, i18n.Errorf("protocole : message inattendu %q", m.Type)
 	}
 	var e source.Entry
 	if err := json.Unmarshal(m.Body, &e); err != nil {
 		return nil, err
 	}
 	if m.Offset != offset {
-		return nil, fmt.Errorf("protocole : reprise à %d demandée, %d accordée", offset, m.Offset)
+		return nil, i18n.Errorf("protocole : reprise à %d demandée, %d accordée", offset, m.Offset)
 	}
 	c.cur = &stream{r: c.br, info: e}
 	return c.cur, nil
@@ -552,10 +553,10 @@ func (s *stream) Finish() (string, error) {
 		return "", io.ErrUnexpectedEOF
 	}
 	if s.end.Type == wire.MsgError {
-		return "", &source.FileError{Rel: s.info.Rel, Msg: s.end.Error}
+		return "", &source.FileError{Rel: s.info.Rel, Msg: i18n.T(s.end.Error)}
 	}
 	if s.end.Type != wire.MsgDone || s.end.Hash == "" {
-		return "", fmt.Errorf("protocole : fin de fichier invalide")
+		return "", errors.New(i18n.T("protocole : fin de fichier invalide"))
 	}
 	return s.end.Hash, nil
 }

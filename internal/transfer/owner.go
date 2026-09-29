@@ -3,12 +3,13 @@ package transfer
 import (
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Owner est le propriétaire final des fichiers écrits en tant que root
@@ -49,7 +50,7 @@ func (o *Owner) Apply(path string) error {
 			continue
 		}
 		if err := syscall.Setxattr(path, name, val, 0); err != nil && !errors.Is(err, syscall.ENOTSUP) {
-			return fmt.Errorf("attribut %s de %s : %w", name, path, err)
+			return i18n.Errorf("attribut %s de %s : %w", name, path, err)
 		}
 	}
 	return nil
@@ -62,7 +63,7 @@ func (o *Owner) Apply(path string) error {
 func SafeParents(root, path string) error {
 	rel, err := filepath.Rel(root, filepath.Dir(path))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("%s est hors de %s", path, root)
+		return i18n.Errorf("%s est hors de %s", path, root)
 	}
 	cur := root
 	parts := []string{""}
@@ -78,7 +79,7 @@ func SafeParents(root, path string) error {
 			return err
 		}
 		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
-			return fmt.Errorf("%s n'est pas un dossier ordinaire : écriture refusée", cur)
+			return i18n.Errorf("%s n'est pas un dossier ordinaire : écriture refusée", cur)
 		}
 	}
 	return nil

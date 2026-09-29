@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/transfer"
 )
@@ -152,7 +153,7 @@ func mkdirOwned(home, dir string) error {
 	uid, gid := ownerOf(hi)
 	rel, err := filepath.Rel(home, dir)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return errors.New("dossier hors du dossier personnel : " + dir)
+		return errors.New(i18n.Tf("dossier hors du dossier personnel : %s", dir))
 	}
 	cur := home
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
@@ -181,14 +182,14 @@ func UndoPreferSource(st *journal.State) []string {
 		if _, err := os.Lstat(r.Dst); err == nil {
 			if _, err := os.Lstat(r.Name); errors.Is(err, os.ErrNotExist) {
 				if err := os.Rename(r.Dst, r.Name); err != nil {
-					errs = append(errs, r.Dst+" : "+err.Error())
+					errs = append(errs, i18n.Tf("%s : %v", r.Dst, err))
 					continue
 				}
 			}
 		}
 		if _, err := os.Lstat(r.Key); err == nil {
 			if err := os.Rename(r.Key, r.Dst); err != nil {
-				errs = append(errs, r.Key+" : "+err.Error())
+				errs = append(errs, i18n.Tf("%s : %v", r.Key, err))
 			}
 		}
 	}

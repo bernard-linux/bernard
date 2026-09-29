@@ -8,9 +8,9 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
@@ -60,7 +60,7 @@ func (c *Controller) Pause(ctx context.Context, spec string) (func(), error) {
 		out, err := c.Exec(ctx, sysexec.Cmd{Name: "virsh", Args: []string{"-c", "qemu:///system", "list", "--state-running", "--name"}})
 		if err == nil {
 			if names := sysexec.Lines(out); len(names) > 0 {
-				return nil, fmt.Errorf("machines virtuelles allumées (%s) : éteignez-les, puis relancez la migration pour les copier", strings.Join(names, ", "))
+				return nil, i18n.Errorf("machines virtuelles allumées (%s) : éteignez-les, puis relancez la migration pour les copier", strings.Join(names, ", "))
 			}
 		}
 		return func() {}, nil
@@ -72,7 +72,7 @@ func (c *Controller) Pause(ctx context.Context, spec string) (func(), error) {
 		}
 		if _, err := c.Exec(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"stop", u}}); err != nil {
 			c.resume(stopped)
-			return nil, fmt.Errorf("arrêt du service %s impossible : %w", u, err)
+			return nil, i18n.Errorf("arrêt du service %s impossible : %w", u, err)
 		}
 		stopped = append(stopped, u)
 	}

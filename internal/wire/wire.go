@@ -6,8 +6,9 @@ package wire
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"io"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Types de trames.
@@ -28,7 +29,7 @@ const Protocol = 1
 // Write envoie une trame.
 func Write(w io.Writer, typ byte, payload []byte) error {
 	if len(payload) > MaxPayload {
-		return fmt.Errorf("trame trop grande : %d octets", len(payload))
+		return i18n.Errorf("trame trop grande : %d octets", len(payload))
 	}
 	var hdr [5]byte
 	hdr[0] = typ
@@ -48,7 +49,7 @@ func Read(r io.Reader) (byte, []byte, error) {
 	}
 	n := binary.BigEndian.Uint32(hdr[1:])
 	if n > MaxPayload {
-		return 0, nil, fmt.Errorf("trame trop grande annoncée : %d octets", n)
+		return 0, nil, i18n.Errorf("trame trop grande annoncée : %d octets", n)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -74,7 +75,7 @@ func ReadJSON(r io.Reader, v any) error {
 		return err
 	}
 	if typ != FrameJSON {
-		return fmt.Errorf("protocole : message attendu, trame %q reçue", typ)
+		return i18n.Errorf("protocole : message attendu, trame %q reçue", typ)
 	}
 	return json.Unmarshal(b, v)
 }

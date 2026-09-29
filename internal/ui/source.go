@@ -14,6 +14,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/agent"
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/discovery"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/pack"
 	"github.com/bernard-linux/bernard/internal/remote"
@@ -91,7 +92,7 @@ func (c *Controller) ChooseRole(role string) error {
 	case "source":
 		c.update(func(s *State) { s.Role, s.Step, s.Error = "source", StepSrcHome, "" })
 	default:
-		return fmt.Errorf("rôle inconnu : %q", role)
+		return i18n.Errorf("rôle inconnu : %q", role)
 	}
 	return nil
 }
@@ -107,7 +108,7 @@ func (c *Controller) StartSource() error {
 	tr, err := discovery.Track(ctx, 0)
 	if err != nil {
 		c.end()
-		return errors.New("écoute du réseau impossible : Bernard est-il déjà ouvert sur cet ordinateur (ou bernard-agent dans un terminal) ?")
+		return errors.New(i18n.T("écoute du réseau impossible : Bernard est-il déjà ouvert sur cet ordinateur (ou bernard-agent dans un terminal) ?"))
 	}
 	c.mu.Lock()
 	c.tracker, c.srcInv, c.invErr, c.invReady = tr, nil, nil, make(chan struct{})
@@ -211,14 +212,14 @@ func (c *Controller) Pair(targetID, code string) error {
 		return -1
 	}, code)
 	if len(code) != 6 {
-		return errors.New("le code comporte 6 chiffres")
+		return errors.New(i18n.T("le code comporte 6 chiffres"))
 	}
 	c.mu.Lock()
 	tr, ctx := c.tracker, c.ctx
 	c.mu.Unlock()
 	st := c.Snapshot()
 	if tr == nil || ctx == nil || st.Step != StepSrcCode || st.Busy {
-		return errors.New("aucun nouvel ordinateur en attente")
+		return errors.New(i18n.T("aucun nouvel ordinateur en attente"))
 	}
 	t, ok := tr.Target(targetID)
 	if !ok {
@@ -227,7 +228,7 @@ func (c *Controller) Pair(targetID, code string) error {
 		}
 	}
 	if !ok {
-		return errors.New("ce nouvel ordinateur n'est plus visible : Bernard y est-il toujours ouvert ?")
+		return errors.New(i18n.T("ce nouvel ordinateur n'est plus visible : Bernard y est-il toujours ouvert ?"))
 	}
 	c.update(func(s *State) { s.Busy, s.Error = true, "" })
 	go c.pairAndSend(ctx, tr, t, code)
@@ -242,17 +243,17 @@ func (c *Controller) pairAndSend(ctx context.Context, tr *discovery.Tracker, t d
 		conn, err = agent.Pair(pctx, r.Addr, code)
 		cancel()
 		if err == nil || errors.Is(err, session.ErrBadCode) || errors.Is(err, session.ErrCodeRevoked) ||
-			strings.Contains(err.Error(), "code") {
+			errors.Is(err, session.ErrCodeExpired) || strings.Contains(err.Error(), "code") {
 			break
 		}
 	}
 	if err != nil {
-		msg := "Connexion impossible : " + err.Error()
+		msg := i18n.Tf("Connexion impossible : %s", err.Error())
 		switch {
 		case errors.Is(err, session.ErrBadCode) || strings.Contains(err.Error(), "incorrect"):
-			msg = "Ce code ne correspond pas. Vérifiez le code affiché sur le nouvel ordinateur."
-		case strings.Contains(err.Error(), "nouveau code"):
-			msg = "Le nouvel ordinateur affiche maintenant un nouveau code : saisissez-le."
+			msg = i18n.T("Ce code ne correspond pas. Vérifiez le code affiché sur le nouvel ordinateur.")
+		case errors.Is(err, session.ErrCodeExpired) || errors.Is(err, session.ErrCodeRevoked) || strings.Contains(err.Error(), "nouveau code"):
+			msg = i18n.T("Le nouvel ordinateur affiche maintenant un nouveau code : saisissez-le.")
 		}
 		c.update(func(s *State) { s.Busy, s.Error = false, msg })
 		return
@@ -265,7 +266,7 @@ func (c *Controller) pairAndSend(ctx context.Context, tr *discovery.Tracker, t d
 	inv, err := c.waitInventory(ctx)
 	if err != nil {
 		conn.Close()
-		c.srcFail(fmt.Errorf("inventaire de cet ordinateur impossible : %w", err))
+		c.srcFail(i18n.Errorf("inventaire de cet ordinateur impossible : %w", err))
 		return
 	}
 	c.update(func(s *State) {
@@ -290,7 +291,7 @@ func (c *Controller) pairAndSend(ctx context.Context, tr *discovery.Tracker, t d
 		})
 	})
 	err = agent.Serve(ctx, conn, srv, tr, t.ID, addr, c.srcLog, func(a string) {
-		label := "réseau"
+		label := i18n.T("réseau")
 		if r, ok := agent.RouteFor(tr, t.ID, a); ok {
 			label = agent.LinkName(r.Link)
 		}
@@ -310,9 +311,13 @@ func (c *Controller) pairAndSend(ctx context.Context, tr *discovery.Tracker, t d
 	c.end()
 }
 
+// srcLinkLostMsg : message du paquet link côté ancien ordinateur, reconnu
+// aussi une fois traduit.
+const srcLinkLostMsg = "Liaison perdue. Recherche d'une autre liaison (câble, Wi-Fi)…"
+
 func (c *Controller) srcLog(msg string) {
 	c.log(msg)
-	if strings.HasPrefix(msg, "Liaison perdue") {
+	if strings.HasPrefix(msg, "Liaison perdue") || msg == i18n.T(srcLinkLostMsg) {
 		c.update(func(s *State) {
 			if s.Send != nil {
 				s.Send.LinkLost = true
@@ -394,7 +399,7 @@ func FindDisks() []DiskInfo {
 // StartPack écrit le paquet chiffré sur le disque choisi.
 func (c *Controller) StartPack(disk, passphrase string) error {
 	if len(passphrase) < 8 {
-		return errors.New("la phrase de passe doit faire au moins 8 caractères")
+		return errors.New(i18n.T("la phrase de passe doit faire au moins 8 caractères"))
 	}
 	var chosen *DiskInfo
 	for _, d := range FindDisks() {
@@ -404,13 +409,13 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 		}
 	}
 	if chosen == nil {
-		return errors.New("ce disque n'est plus branché")
+		return errors.New(i18n.T("ce disque n'est plus branché"))
 	}
 	c.mu.Lock()
 	ctx := c.ctx
 	c.mu.Unlock()
 	if ctx == nil || c.Snapshot().Busy {
-		return errors.New("aucune préparation en cours")
+		return errors.New(i18n.T("aucune préparation en cours"))
 	}
 	host, _ := os.Hostname()
 	dest := filepath.Join(disk, fmt.Sprintf("Bernard - %s - %s", host, time.Now().Format("2006-01-02")))
@@ -422,12 +427,12 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 	}
 	c.update(func(s *State) {
 		s.Step, s.Busy, s.Error = StepSrcSend, true, ""
-		s.Send = &SendInfo{Phase: "prepare", StartedAt: time.Now(), Dest: dest, Link: "disque externe"}
+		s.Send = &SendInfo{Phase: "prepare", StartedAt: time.Now(), Dest: dest, Link: i18n.T("disque externe")}
 	})
 	go func() {
 		inv, err := c.waitInventory(ctx)
 		if err != nil {
-			c.srcFail(fmt.Errorf("inventaire de cet ordinateur impossible : %w", err))
+			c.srcFail(i18n.Errorf("inventaire de cet ordinateur impossible : %w", err))
 			return
 		}
 		var total int64
@@ -435,7 +440,7 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 			total += d.SizeBytes
 		}
 		if total > chosen.Free {
-			c.srcFail(fmt.Errorf("pas assez de place sur %s : %s nécessaires, %s libres", chosen.Label, human(total), human(chosen.Free)))
+			c.srcFail(i18n.Errorf("pas assez de place sur %s : %s nécessaires, %s libres", chosen.Label, human(total), human(chosen.Free)))
 			return
 		}
 		if err := os.Mkdir(dest, 0o700); err != nil {
@@ -455,7 +460,7 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 			}})
 		if err != nil {
 			if ctx.Err() == nil {
-				c.srcFail(fmt.Errorf("écriture du paquet impossible : %w", err))
+				c.srcFail(i18n.Errorf("écriture du paquet impossible : %w", err))
 			}
 			return
 		}
@@ -471,14 +476,14 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 func human(b int64) string {
 	const unit = 1000
 	if b < unit {
-		return fmt.Sprintf("%d o", b)
+		return i18n.Tf("%d o", b)
 	}
 	div, exp := int64(unit), 0
 	for n := b / unit; n >= unit; n /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %co", float64(b)/float64(div), "kMGTPE"[exp])
+	return i18n.Tf("%.1f %co", float64(b)/float64(div), "kMGTPE"[exp])
 }
 
 // packPrepare arrête les services (bases…) pendant l'écriture de leurs

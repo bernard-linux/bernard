@@ -3,7 +3,6 @@ package apply
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/user"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/engine"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
@@ -205,7 +205,7 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 			ds.Dest = act.To // autre disque : destination choisie sur la cible
 		}
 		if !SystemDestOK(ds.Dest, homes) {
-			out[ds.ID] = &transfer.TreeReport{Errors: []transfer.FileError{{Path: ds.Dest, Err: "emplacement refusé"}}}
+			out[ds.ID] = &transfer.TreeReport{Errors: []transfer.FileError{{Path: ds.Dest, Err: i18n.T("emplacement refusé")}}}
 			continue
 		}
 		if ds.Dest == "/etc" {
@@ -238,7 +238,7 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 			continue
 		}
 		if err != nil {
-			return out, fmt.Errorf("%s : %w", ds.Dest, err)
+			return out, i18n.Errorf("%s : %w", ds.Dest, err)
 		}
 		if ds.Dest != oldPath {
 			RewriteSteam(inv, oldPath, ds.Dest)
@@ -265,11 +265,11 @@ func UndoReplaced(st *journal.State) (restored []string, errs []string) {
 			continue
 		}
 		if _, err := os.Lstat(r.Name); err == nil {
-			errs = append(errs, r.Name+" : modifié depuis la migration, version d'origine gardée dans "+r.Dst)
+			errs = append(errs, i18n.Tf("%s : modifié depuis la migration, version d'origine gardée dans %s", r.Name, r.Dst))
 			continue
 		}
 		if err := moveAside(r.Dst, r.Name); err != nil {
-			errs = append(errs, r.Name+" : "+err.Error())
+			errs = append(errs, i18n.Tf("%s : %v", r.Name, err))
 			continue
 		}
 		restored = append(restored, r.Name)

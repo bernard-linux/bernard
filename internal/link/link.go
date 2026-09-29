@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/remote"
 	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/source"
@@ -113,13 +114,13 @@ func Serve(ctx context.Context, conn *session.Conn, srv *remote.Server, o Option
 			return err
 		}
 		if prefer == "" {
-			o.Log("Liaison perdue. Recherche d'une autre liaison (câble, Wi-Fi)…")
+			o.Log(i18n.T("Liaison perdue. Recherche d'une autre liaison (câble, Wi-Fi)…"))
 		}
 		deadline := time.Now().Add(GiveUp)
 		conn = nil
 		for conn == nil {
 			if time.Now().After(deadline) {
-				return errors.New("liaison non rétablie : relancez la commande pour reprendre")
+				return errors.New(i18n.T("liaison non rétablie : relancez la commande pour reprendre"))
 			}
 			addrs := o.Routes(ctx)
 			if prefer != "" {
@@ -129,7 +130,7 @@ func Serve(ctx context.Context, conn *session.Conn, srv *remote.Server, o Option
 				c, rerr := session.Resume(ctx, addr, key, o.Name)
 				if rerr == nil {
 					conn = c
-					o.Log("Reconnecté via " + addr + ". Le transfert reprend.")
+					o.Log(i18n.Tf("Reconnecté via %s. Le transfert reprend.", addr))
 					if o.OnConnect != nil {
 						o.OnConnect(addr)
 					}
@@ -175,7 +176,7 @@ func watchBetter(conn *session.Conn, o Options, stop <-chan struct{}, switched c
 			streak, last = 1, addr
 		}
 		if streak >= 2 {
-			o.Log("Liaison plus rapide détectée (" + label + ") : bascule en cours…")
+			o.Log(i18n.Tf("Liaison plus rapide détectée (%s) : bascule en cours…", label))
 			switched <- addr
 			conn.Close()
 			return
@@ -225,7 +226,7 @@ func ReceiveWithReconnect(ctx context.Context, first *session.Conn, accept Accep
 		if ctx.Err() != nil || !IsLinkError(err) {
 			return err
 		}
-		log("Liaison perdue. En attente de l'ancien ordinateur ; le transfert reprendra seul…")
+		log(i18n.T("Liaison perdue. En attente de l'ancien ordinateur ; le transfert reprendra seul…"))
 		wctx, cancel := context.WithTimeout(ctx, GiveUp)
 		type res struct {
 			c   *session.Conn
@@ -243,10 +244,10 @@ func ReceiveWithReconnect(ctx context.Context, first *session.Conn, accept Accep
 				return r.err
 			}
 			conn = r.c
-			log("Reconnecté. Reprise du transfert.")
+			log(i18n.T("Reconnecté. Reprise du transfert."))
 		case <-wctx.Done():
 			cancel()
-			return errors.New("l'ancien ordinateur ne s'est pas reconnecté : relancez les deux commandes pour reprendre")
+			return errors.New(i18n.T("l'ancien ordinateur ne s'est pas reconnecté : relancez les deux commandes pour reprendre"))
 		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
@@ -198,10 +199,10 @@ func (w *Watcher) Scan(ctx context.Context, now time.Time) {
 		}
 		if err != nil {
 			w.failed[dev] = true
-			w.log("Câble direct sur " + dev + " : adresse automatique impossible (" + err.Error() + ")")
+			w.log(i18n.Tf("Câble direct sur %s : adresse automatique impossible (%s)", dev, err.Error()))
 			continue
 		}
-		w.log("Câble direct détecté sur " + dev + " : adresse automatique en lien local (169.254.x.x)")
+		w.log(i18n.Tf("Câble direct détecté sur %s : adresse automatique en lien local (169.254.x.x)", dev))
 	}
 	for dev := range w.since {
 		if !plugged[dev] {

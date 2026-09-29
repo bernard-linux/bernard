@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Schema identifie la version du format. Le moteur refuse toute autre valeur.
@@ -194,24 +195,24 @@ type Network struct {
 // Validate vérifie la cohérence minimale d'un inventaire.
 func (inv *Inventory) Validate() error {
 	if inv.Schema != Schema {
-		return fmt.Errorf("format d'inventaire non pris en charge : %q (attendu %q)", inv.Schema, Schema)
+		return i18n.Errorf("format d'inventaire non pris en charge : %q (attendu %q)", inv.Schema, Schema)
 	}
 	users := map[string]bool{}
 	for _, u := range inv.Users {
 		if u.ID == "" || u.Login == "" {
-			return fmt.Errorf("utilisateur incomplet : %+v", u)
+			return i18n.Errorf("utilisateur incomplet : %+v", u)
 		}
 		users[u.ID] = true
 	}
 	for _, d := range inv.DataSets {
 		if d.Kind == "system" {
 			if d.Dest == "" || !strings.HasPrefix(d.Dest, "/") || strings.Contains(d.Dest, "..") {
-				return fmt.Errorf("jeu de données %s : destination refusée %q", d.ID, d.Dest)
+				return i18n.Errorf("jeu de données %s : destination refusée %q", d.ID, d.Dest)
 			}
 			continue
 		}
 		if !users[d.User] {
-			return fmt.Errorf("jeu de données %s rattaché à un utilisateur inconnu %q", d.ID, d.User)
+			return i18n.Errorf("jeu de données %s rattaché à un utilisateur inconnu %q", d.ID, d.User)
 		}
 	}
 	return nil
@@ -261,7 +262,7 @@ func Load(path string) (*Inventory, error) {
 	}
 	var inv Inventory
 	if err := json.Unmarshal(b, &inv); err != nil {
-		return nil, fmt.Errorf("inventaire illisible : %w", err)
+		return nil, i18n.Errorf("inventaire illisible : %w", err)
 	}
 	if err := inv.Validate(); err != nil {
 		return nil, err

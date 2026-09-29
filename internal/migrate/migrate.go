@@ -10,13 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/bernard-linux/bernard/internal/apply"
 	"github.com/bernard-linux/bernard/internal/engine"
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
@@ -135,7 +135,7 @@ func Extras(ctx context.Context, src source.Source) *settings.Extras {
 }
 
 // ErrPasswordMissing signale un compte à créer sans mot de passe fourni.
-var ErrPasswordMissing = errors.New("mot de passe manquant")
+var ErrPasswordMissing = i18n.NewError("mot de passe manquant")
 
 // MissingPasswords renvoie les comptes pour lesquels il faudra saisir un
 // mot de passe, compte tenu des hachages disponibles.
@@ -162,13 +162,13 @@ func Secrets(ctx context.Context, src source.Source) map[string]string {
 // Execute exécute le plan : comptes et applications, puis données. Peut être
 // rappelée après une coupure : le journal fait sauter ce qui est fait.
 func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, secrets map[string]string, h Hooks) (*Result, error) {
-	log := func(format string, v ...any) {
+	log := func(msg string) {
 		if h.Log != nil {
-			h.Log(fmt.Sprintf(format, v...))
+			h.Log(msg)
 		}
 	}
 	if s.Plan.Blocked {
-		return nil, errors.New("espace disque insuffisant sur cet ordinateur")
+		return nil, errors.New(i18n.T("espace disque insuffisant sur cet ordinateur"))
 	}
 	if err := os.MkdirAll(filepath.Dir(s.JournalPath), 0o700); err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 			if pw := ch.Passwords[login]; pw != "" {
 				return pw, nil
 			}
-			return "", fmt.Errorf("%w pour %s", ErrPasswordMissing, login)
+			return "", i18n.Errorf("%w pour %s", ErrPasswordMissing, login)
 		},
 	}
 	res.System, err = ap.System(ctx, s.Plan, s.Inv)
@@ -200,7 +200,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 	if h.Phase != nil {
 		h.Phase("copy")
 	}
-	log("Copie des données…")
+	log(i18n.T("Copie des données…"))
 	created := map[string]bool{}
 	for _, rec := range st.Sys {
 		if rec.Op == journal.SysUserCreated {
@@ -223,7 +223,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 	if h.Phase != nil {
 		h.Phase("settings")
 	}
-	log("Reprise des réglages…")
+	log(i18n.T("Reprise des réglages…"))
 	ex := Extras(ctx, src)
 	for _, w := range ex.Warnings {
 		log("  " + w)

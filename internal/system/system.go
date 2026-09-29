@@ -7,7 +7,6 @@ package system
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/user"
 	"regexp"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
@@ -26,7 +26,7 @@ var (
 )
 
 // ErrInvalid signale un paramètre refusé par la validation.
-var ErrInvalid = errors.New("paramètre refusé")
+var ErrInvalid = i18n.NewError("paramètre refusé")
 
 // AllowedGroups sont les groupes secondaires repris de la source, s'ils
 // existent sur la cible. Les autres (groupes de services, groupes créés par
@@ -112,19 +112,19 @@ func (s *System) uidFree(ctx context.Context, uid int) bool {
 // de passe. Renvoie les groupes effectivement attribués.
 func (s *System) CreateUser(ctx context.Context, u UserSpec) ([]string, error) {
 	if !loginRe.MatchString(u.Login) {
-		return nil, fmt.Errorf("%w : identifiant %q", ErrInvalid, u.Login)
+		return nil, i18n.Errorf("%w : identifiant %q", ErrInvalid, u.Login)
 	}
 	if s.UserExists(ctx, u.Login) {
-		return nil, fmt.Errorf("le compte %s existe déjà", u.Login)
+		return nil, i18n.Errorf("le compte %s existe déjà", u.Login)
 	}
 	if u.PasswordHash == "" && u.Password == "" {
-		return nil, fmt.Errorf("%w : aucun mot de passe pour %s", ErrInvalid, u.Login)
+		return nil, i18n.Errorf("%w : aucun mot de passe pour %s", ErrInvalid, u.Login)
 	}
 	if u.PasswordHash != "" && !hashRe.MatchString(u.PasswordHash) {
-		return nil, fmt.Errorf("%w : hachage de mot de passe", ErrInvalid)
+		return nil, i18n.Errorf("%w : hachage de mot de passe", ErrInvalid)
 	}
 	if strings.ContainsAny(u.Password, "\n\r") {
-		return nil, fmt.Errorf("%w : mot de passe", ErrInvalid)
+		return nil, i18n.Errorf("%w : mot de passe", ErrInvalid)
 	}
 	gecos := strings.Map(func(r rune) rune {
 		if r == ':' || r == ',' || r == '\n' || r == '\r' {
@@ -164,7 +164,7 @@ func (s *System) CreateUser(ctx context.Context, u UserSpec) ([]string, error) {
 		c.Stdin = u.Login + ":" + u.Password + "\n"
 	}
 	if _, err := s.exec(ctx, c); err != nil {
-		return groups, fmt.Errorf("mot de passe de %s non défini : %w", u.Login, err)
+		return groups, i18n.Errorf("mot de passe de %s non défini : %w", u.Login, err)
 	}
 	return groups, nil
 }
@@ -173,7 +173,7 @@ func (s *System) CreateUser(ctx context.Context, u UserSpec) ([]string, error) {
 // conservé : il peut contenir des fichiers ajoutés depuis.
 func (s *System) DeleteUser(ctx context.Context, login string) error {
 	if !loginRe.MatchString(login) {
-		return fmt.Errorf("%w : identifiant %q", ErrInvalid, login)
+		return i18n.Errorf("%w : identifiant %q", ErrInvalid, login)
 	}
 	_, err := s.run(ctx, "userdel", "--", login)
 	return err
@@ -249,7 +249,7 @@ func (s *System) AptInstall(ctx context.Context, pkgs []string) (added []string,
 		case after[p] && !before[p]:
 			added = append(added, p)
 		case !after[p] && failed[p] == nil:
-			failed[p] = errors.New("non installé")
+			failed[p] = errors.New(i18n.T("non installé"))
 		}
 	}
 	return added, failed
@@ -310,7 +310,7 @@ func (s *System) FlatpakOrigin(ctx context.Context, id string) string {
 // FlatpakReinstall remet une application retirée, depuis son dépôt d'origine.
 func (s *System) FlatpakReinstall(ctx context.Context, remote, id string) error {
 	if !flatpakRe.MatchString(id) || (remote != "" && !flatpakRe.MatchString(remote)) {
-		return fmt.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
+		return i18n.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
 	}
 	if remote == "" {
 		remote = "flathub"
@@ -325,7 +325,7 @@ func (s *System) FlatpakSetup(ctx context.Context) (addedFlatpak, addedRemote bo
 	if _, err := s.run(ctx, "flatpak", "--version"); err != nil {
 		added, failed := s.AptInstall(ctx, []string{"flatpak"})
 		if f := failed["flatpak"]; f != nil {
-			return false, false, fmt.Errorf("installation de Flatpak : %w", f)
+			return false, false, i18n.Errorf("installation de Flatpak : %w", f)
 		}
 		addedFlatpak = len(added) > 0
 	}
@@ -344,7 +344,7 @@ func (s *System) FlatpakSetup(ctx context.Context) (addedFlatpak, addedRemote bo
 // FlatpakInstall installe une application Flathub pour tout le système.
 func (s *System) FlatpakInstall(ctx context.Context, id string) error {
 	if !flatpakRe.MatchString(id) {
-		return fmt.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
+		return i18n.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
 	}
 	_, err := s.run(ctx, "flatpak", "install", "--system", "--noninteractive", "--assumeyes", "flathub", id)
 	return err
@@ -353,7 +353,7 @@ func (s *System) FlatpakInstall(ctx context.Context, id string) error {
 // FlatpakUninstall retire une application installée par Bernard.
 func (s *System) FlatpakUninstall(ctx context.Context, id string) error {
 	if !flatpakRe.MatchString(id) {
-		return fmt.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
+		return i18n.Errorf("%w : identifiant Flatpak %q", ErrInvalid, id)
 	}
 	_, err := s.run(ctx, "flatpak", "uninstall", "--system", "--noninteractive", "--assumeyes", id)
 	return err

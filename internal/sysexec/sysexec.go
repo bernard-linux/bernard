@@ -5,16 +5,17 @@ package sysexec
 import (
 	"bufio"
 	"context"
-	"errors"
 	"os/exec"
 	"strings"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Runner exécute une commande et renvoie sa sortie standard.
 type Runner func(ctx context.Context, name string, args ...string) (string, error)
 
 // ErrMissingCommand signale qu'un outil n'est pas installé.
-var ErrMissingCommand = errors.New("commande absente")
+var ErrMissingCommand = i18n.NewError("commande absente")
 
 // Exec est le Runner réel. La locale est forcée à C pour des sorties stables.
 func Exec(ctx context.Context, name string, args ...string) (string, error) {
@@ -96,9 +97,9 @@ type CmdError struct {
 
 func (e *CmdError) Error() string {
 	if e.Stderr != "" {
-		return e.Cmd + " : " + e.Stderr
+		return i18n.Tf("%s : %s", e.Cmd, e.Stderr)
 	}
-	return e.Cmd + " : " + e.Err.Error()
+	return i18n.Tf("%s : %s", e.Cmd, e.Err.Error())
 }
 
 func (e *CmdError) Unwrap() error { return e.Err }

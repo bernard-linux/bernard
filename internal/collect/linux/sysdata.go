@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
 
@@ -141,16 +142,16 @@ var varLibSystem = map[string]bool{
 var recognizers = []struct {
 	rel, kind, label, service string
 }{
-	{"var/lib/mysql", inventory.SysDatabase, "Bases MySQL / MariaDB", "mysql"},
-	{"var/lib/postgresql", inventory.SysDatabase, "Bases PostgreSQL", "postgresql"},
-	{"var/lib/mongodb", inventory.SysDatabase, "Bases MongoDB", "mongod"},
-	{"var/lib/redis", inventory.SysDatabase, "Données Redis", "redis-server"},
-	{"var/lib/docker", inventory.SysContainer, "Docker : images, conteneurs et volumes", "docker.socket docker"},
-	{"var/lib/containers", inventory.SysContainer, "Podman : images et conteneurs", "podman.socket podman"},
-	{"var/snap/lxd/common/lxd", inventory.SysContainer, "LXD : conteneurs", "snap.lxd.daemon"},
-	{"var/lib/libvirt/images", inventory.SysVM, "Machines virtuelles (libvirt)", "libvirtd"}, // définitions : dans /etc
-	{"opt/FileMaker/FileMaker Server/Data", inventory.SysAppServer, "Serveur FileMaker : bases et réglages", "fmshelper"},
-	{"var/www", inventory.SysWeb, "Sites web (/var/www)", ""},
+	{"var/lib/mysql", inventory.SysDatabase, i18n.N("Bases MySQL / MariaDB"), "mysql"},
+	{"var/lib/postgresql", inventory.SysDatabase, i18n.N("Bases PostgreSQL"), "postgresql"},
+	{"var/lib/mongodb", inventory.SysDatabase, i18n.N("Bases MongoDB"), "mongod"},
+	{"var/lib/redis", inventory.SysDatabase, i18n.N("Données Redis"), "redis-server"},
+	{"var/lib/docker", inventory.SysContainer, i18n.N("Docker : images, conteneurs et volumes"), "docker.socket docker"},
+	{"var/lib/containers", inventory.SysContainer, i18n.N("Podman : images et conteneurs"), "podman.socket podman"},
+	{"var/snap/lxd/common/lxd", inventory.SysContainer, i18n.N("LXD : conteneurs"), "snap.lxd.daemon"},
+	{"var/lib/libvirt/images", inventory.SysVM, i18n.N("Machines virtuelles (libvirt)"), "libvirtd"}, // définitions : dans /etc
+	{"opt/FileMaker/FileMaker Server/Data", inventory.SysAppServer, i18n.N("Serveur FileMaker : bases et réglages"), "fmshelper"},
+	{"var/www", inventory.SysWeb, i18n.N("Sites web (/var/www)"), ""},
 }
 
 // linkSeen repère les fichiers à plusieurs noms (liens durs), comptés une
@@ -345,7 +346,7 @@ func (s *scanner) recognized() {
 			continue
 		}
 		u := s.measure(r.rel, nil)
-		s.add(inventory.SystemItem{Kind: r.kind, Label: r.label, Paths: []string{s.abs(r.rel)},
+		s.add(inventory.SystemItem{Kind: r.kind, Label: i18n.T(r.label), Paths: []string{s.abs(r.rel)},
 			Files: u.files, Bytes: u.bytes, Used: u.used, Service: r.service})
 	}
 }
@@ -394,7 +395,7 @@ func (s *scanner) etc() {
 	if len(include) == 0 {
 		return
 	}
-	s.addWith(inventory.SystemItem{Kind: inventory.SysEtc, Label: "Réglages système modifiés ou ajoutés (/etc)",
+	s.addWith(inventory.SystemItem{Kind: inventory.SysEtc, Label: i18n.T("Réglages système modifiés ou ajoutés (/etc)"),
 		Paths: []string{"/etc"}, Files: u.files, Bytes: u.bytes, Used: u.used, Detail: detail}, include)
 }
 
@@ -412,8 +413,9 @@ func fileMD5(p string) string {
 }
 
 // perChild ajoute un élément par sous-dossier de rel qui contient des
-// fichiers n'appartenant à aucun paquet (/opt/x, /srv/x).
-func (s *scanner) perChild(rel, kind, prefix string) {
+// fichiers n'appartenant à aucun paquet (/opt/x, /srv/x). format (marqué
+// par i18n.N) reçoit le nom du sous-dossier.
+func (s *scanner) perChild(rel, kind, format string) {
 	entries, _ := os.ReadDir(filepath.Join(s.root, rel))
 	for _, e := range entries {
 		child := filepath.Join(rel, e.Name())
@@ -421,7 +423,7 @@ func (s *scanner) perChild(rel, kind, prefix string) {
 			continue
 		}
 		u, include := s.measureUnowned(child)
-		s.addWith(inventory.SystemItem{Kind: kind, Label: prefix + e.Name(), Paths: []string{s.abs(child)},
+		s.addWith(inventory.SystemItem{Kind: kind, Label: i18n.Tf(format, e.Name()), Paths: []string{s.abs(child)},
 			Files: u.files, Bytes: u.bytes, Used: u.used}, include)
 	}
 }
@@ -439,7 +441,7 @@ func (s *scanner) varLib() {
 		if u.bytes < 1<<20 {
 			continue
 		}
-		s.addWith(inventory.SystemItem{Kind: inventory.SysService, Label: "Données du service « " + e.Name() + " »",
+		s.addWith(inventory.SystemItem{Kind: inventory.SysService, Label: i18n.Tf("Données du service « %s »", e.Name()),
 			Paths: []string{s.abs(rel)}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview}, include)
 	}
 }
@@ -454,12 +456,12 @@ func (s *scanner) custom(mounts map[string]bool) {
 		}
 		if name == "timeshift" {
 			u := s.measure(name, nil)
-			s.add(inventory.SystemItem{Kind: inventory.SysBackup, Label: "Sauvegardes Timeshift (/timeshift)",
+			s.add(inventory.SystemItem{Kind: inventory.SysBackup, Label: i18n.T("Sauvegardes Timeshift (/timeshift)"),
 				Paths: []string{"/" + name}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceSkip})
 			continue
 		}
 		u := s.measure(name, nil)
-		s.add(inventory.SystemItem{Kind: inventory.SysCustom, Label: "Dossier /" + name,
+		s.add(inventory.SystemItem{Kind: inventory.SysCustom, Label: i18n.Tf("Dossier /%s", name),
 			Paths: []string{"/" + name}, Files: u.files, Bytes: u.bytes, Used: u.used})
 	}
 }
@@ -556,10 +558,10 @@ func (s *scanner) disks(mountsFile string) ([]inventory.Disk, map[string]bool) {
 		}
 		kind, advice := classifyDisk(filepath.Join(s.root, m.point))
 		label := map[string]string{
-			inventory.SysBackup:   "Disque de sauvegarde",
-			inventory.SysSteam:    "Bibliothèque de jeux",
-			inventory.SysHomeElse: "Dossier personnel sur un autre disque",
-			inventory.SysDisk:     "Autre disque",
+			inventory.SysBackup:   i18n.T("Disque de sauvegarde"),
+			inventory.SysSteam:    i18n.T("Bibliothèque de jeux"),
+			inventory.SysHomeElse: i18n.T("Dossier personnel sur un autre disque"),
+			inventory.SysDisk:     i18n.T("Autre disque"),
 		}[kind] + " (" + m.point + ")"
 		s.add(inventory.SystemItem{Kind: kind, Label: label, Paths: []string{m.point}, Bytes: used, Used: used, Advice: advice,
 			UUID: d.UUID, FSType: m.fstype})
@@ -610,7 +612,7 @@ func (s *scanner) steamLibraries(users []inventory.User) {
 					continue
 				}
 				us := s.measure(p, nil)
-				s.add(inventory.SystemItem{Kind: inventory.SysSteam, Label: "Bibliothèque Steam (" + p + ")",
+				s.add(inventory.SystemItem{Kind: inventory.SysSteam, Label: i18n.Tf("Bibliothèque Steam (%s)", p),
 					Paths: []string{p}, Files: us.files, Bytes: us.bytes, Used: us.used})
 			}
 		}
@@ -644,7 +646,7 @@ func (s *scanner) homeExtras(users []inventory.User) {
 			continue
 		}
 		u := s.measure(rel, nil)
-		s.add(inventory.SystemItem{Kind: inventory.SysCustom, Label: "Dossier /" + rel + " (sans compte)",
+		s.add(inventory.SystemItem{Kind: inventory.SysCustom, Label: i18n.Tf("Dossier /%s (sans compte)", rel),
 			Paths: []string{"/" + rel}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview})
 	}
 }
@@ -668,18 +670,18 @@ func ScanSystem(root, mountsFile string, users []inventory.User) ([]inventory.Sy
 	s.recognized()
 	s.steamLibraries(users)
 	s.etc()
-	s.perChild("opt", inventory.SysOpt, "Logiciel installé à la main : /opt/")
-	s.perChild("srv", inventory.SysSrv, "Données de service : /srv/")
+	s.perChild("opt", inventory.SysOpt, i18n.N("Logiciel installé à la main : /opt/%s"))
+	s.perChild("srv", inventory.SysSrv, i18n.N("Données de service : /srv/%s"))
 	if !s.claimed["usr/local"] {
 		u, include := s.measureUnowned("usr/local")
-		s.addWith(inventory.SystemItem{Kind: inventory.SysLocal, Label: "Programmes et fichiers ajoutés (/usr/local)",
+		s.addWith(inventory.SystemItem{Kind: inventory.SysLocal, Label: i18n.T("Programmes et fichiers ajoutés (/usr/local)"),
 			Paths: []string{"/usr/local"}, Files: u.files, Bytes: u.bytes, Used: u.used}, include)
 	}
 	s.varLib()
 	s.custom(mounts)
 	s.homeExtras(users)
 	if u := s.measure("root", nil); u.files > 0 {
-		s.add(inventory.SystemItem{Kind: inventory.SysRoot, Label: "Dossier de l'administrateur (/root)",
+		s.add(inventory.SystemItem{Kind: inventory.SysRoot, Label: i18n.T("Dossier de l'administrateur (/root)"),
 			Paths: []string{"/root"}, Files: u.files, Bytes: u.bytes, Used: u.used, Advice: inventory.AdviceReview})
 	}
 	return s.items, disks, s.datasets

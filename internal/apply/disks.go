@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bernard-linux/bernard/internal/i18n"
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
@@ -56,9 +57,9 @@ func (a *Applier) attachDisks(ctx context.Context, p *plan.Plan, inv *inventory.
 			continue
 		}
 		it := items[act.From]
-		label := "Disque rattaché : " + act.To
+		label := i18n.Tf("Disque rattaché : %s", act.To)
 		if !uuidRe.MatchString(it.UUID) || !strings.HasPrefix(act.To, "/") || filepath.Clean(act.To) != act.To {
-			rep.Failed[label] = "identifiant ou emplacement refusé"
+			rep.Failed[label] = i18n.T("identifiant ou emplacement refusé")
 			continue
 		}
 		if a.did(journal.SysFstab, it.UUID) {
@@ -70,7 +71,7 @@ func (a *Applier) attachDisks(ctx context.Context, p *plan.Plan, inv *inventory.
 			continue
 		}
 		if strings.Contains(string(cur), "UUID="+it.UUID) {
-			rep.Skipped[label] = "déjà présent dans /etc/fstab"
+			rep.Skipped[label] = i18n.T("déjà présent dans /etc/fstab")
 			continue
 		}
 		backup := filepath.Join(filepath.Dir(a.Journal.Path), "fstab-"+strconv.Itoa(len(a.State.Sys)))
@@ -109,7 +110,7 @@ func (a *Applier) attachDisks(ctx context.Context, p *plan.Plan, inv *inventory.
 		}
 		sysexec.Run(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"daemon-reload"}})
 		if _, err := sysexec.Run(ctx, sysexec.Cmd{Name: "mount", Args: []string{"--", act.To}}); err != nil {
-			rep.Skipped[label] = "ajouté au démarrage ; montage immédiat impossible (" + err.Error() + ")"
+			rep.Skipped[label] = i18n.Tf("ajouté au démarrage ; montage immédiat impossible (%v)", err)
 		} else {
 			rep.Applied = append(rep.Applied, label)
 		}

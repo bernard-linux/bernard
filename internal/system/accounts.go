@@ -3,13 +3,14 @@ package system
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/bernard-linux/bernard/internal/i18n"
 )
 
 // Comptes provisoires.
@@ -119,14 +120,14 @@ func RemovalScheduled(login string) bool {
 }
 
 // ErrLastAdmin : supprimer ce compte ne laisserait aucun administrateur.
-var ErrLastAdmin = errors.New("aucun autre compte administrateur : ce compte ne peut pas être supprimé")
+var ErrLastAdmin = i18n.NewError("aucun autre compte administrateur : ce compte ne peut pas être supprimé")
 
 // CheckRemovable vérifie qu'un compte peut être supprimé : compte humain,
 // et au moins un AUTRE administrateur restera (sinon plus personne ne
 // pourrait installer de logiciel ni gérer l'ordinateur).
 func CheckRemovable(login string) (Account, error) {
 	if !loginRe.MatchString(login) {
-		return Account{}, fmt.Errorf("%w : identifiant %q", ErrInvalid, login)
+		return Account{}, i18n.Errorf("%w : identifiant %q", ErrInvalid, login)
 	}
 	accs, err := HumanAccounts()
 	if err != nil {
@@ -142,7 +143,7 @@ func CheckRemovable(login string) (Account, error) {
 		}
 	}
 	if target == nil {
-		return Account{}, fmt.Errorf("%s n'est pas un compte utilisateur de cet ordinateur", login)
+		return Account{}, i18n.Errorf("%s n'est pas un compte utilisateur de cet ordinateur", login)
 	}
 	if !otherAdmin {
 		return *target, ErrLastAdmin
@@ -186,7 +187,7 @@ WantedBy=multi-user.target
 // CancelRemoval annule une suppression programmée.
 func (s *System) CancelRemoval(ctx context.Context, login string) error {
 	if !loginRe.MatchString(login) {
-		return fmt.Errorf("%w : identifiant %q", ErrInvalid, login)
+		return i18n.Errorf("%w : identifiant %q", ErrInvalid, login)
 	}
 	if !RemovalScheduled(login) {
 		return nil
@@ -206,7 +207,7 @@ func (s *System) RemoveAccountNow(ctx context.Context, login string) error {
 	if out, err := s.run(ctx, "loginctl", "list-sessions", "--no-legend"); err == nil {
 		for _, l := range strings.Split(out, "\n") {
 			if f := strings.Fields(l); len(f) >= 3 && f[2] == login {
-				return fmt.Errorf("une session de %s est ouverte : suppression abandonnée", login)
+				return i18n.Errorf("une session de %s est ouverte : suppression abandonnée", login)
 			}
 		}
 	}

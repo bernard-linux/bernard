@@ -47,7 +47,7 @@ func (a *Applier) asUser(ctx context.Context, login, home, stdin string, args ..
 
 // ApplyDconf sauvegarde les réglages actuels du compte puis charge ceux de
 // la source. Renvoie le chemin de la sauvegarde, pour l'annulation.
-func (a *Applier) ApplyDconf(ctx context.Context, login, home string, d Dump) (string, error) {
+func (a *Applier) ApplyDconf(ctx context.Context, login, home string, d Dump, resets ...string) (string, error) {
 	ini := d.String()
 	if strings.TrimSpace(ini) == "" {
 		return "", ErrSkipped
@@ -66,6 +66,12 @@ func (a *Applier) ApplyDconf(ctx context.Context, login, home string, d Dump) (s
 		if err := os.WriteFile(backup, []byte(current), 0o600); err != nil {
 			return "", err
 		}
+	}
+	for _, p := range resets {
+		if strings.Contains(p, "..") {
+			continue
+		}
+		a.asUser(ctx, login, home, "", "dconf", "reset", "-f", "/"+strings.Trim(p, "/")+"/")
 	}
 	if _, err := a.asUser(ctx, login, home, ini, "dconf", "load", "/"); err != nil {
 		return backup, err

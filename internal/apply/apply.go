@@ -345,11 +345,12 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				continue
 			}
 			if act.Reason != plan.ReasonDesktopMismatch && !a.did(journal.SysDconfApplied, act.Login) {
-				d := settings.Translate(settings.ParseDump(ex.Dconf[act.Login]), ex.Desktop, p.Target.Desktop, settings.ThemeExists(home), keepKeyboard(p, act.Login))
+				hw := settings.Hardware{KeepKeyboard: keepKeyboard(p, act.Login), TargetKeyboard: p.Target.Keyboard}
+				d := settings.Translate(settings.ParseDump(ex.Dconf[act.Login]), ex.Desktop, p.Target.Desktop, settings.ThemeExists(home), hw)
 				if len(d) == 0 {
 					note("Réglages du bureau de "+act.Login, fmt.Errorf("%w : aucun réglage lu sur l'ancien ordinateur", settings.ErrSkipped))
 				} else {
-					backup, err := sa.ApplyDconf(ctx, act.Login, home, d)
+					backup, err := sa.ApplyDconf(ctx, act.Login, home, d, hw.Resets()...)
 					if backup != "" {
 						if rerr := a.Journal.Append(journal.Record{T: journal.RecSys, Op: journal.SysDconfApplied, Name: act.Login, Dst: backup}); rerr != nil {
 							return rep, rerr

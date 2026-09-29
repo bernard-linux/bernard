@@ -184,18 +184,76 @@ func Fidelity(src, dst string) string {
 // le demande, ou si les deux ordinateurs ont la même disposition.
 var keyboardPaths = []string{"org/gnome/desktop/input-sources", "org/gnome/libgnomekbd/keyboard"}
 
+// Chemins propres au matériel, jamais repris : profils de couleur des écrans.
+var hardwarePaths = []string{"org/gnome/settings-daemon/plugins/color", "org/cinnamon/settings-daemon/plugins/color"}
+
+// Hardware dit comment traiter ce qui tient au matériel de la cible.
+type Hardware struct {
+	// KeepKeyboard reprend la disposition du clavier de la source.
+	KeepKeyboard bool
+	// TargetKeyboard est la disposition du système cible (« be »,
+	// « be,fr+bepo »), imposée au compte quand KeepKeyboard est faux.
+	TargetKeyboard string
+}
+
+// Resets renvoie les chemins dconf à vider avant de charger les réglages.
+// Nécessaire parce que le dossier personnel copié contient déjà la base
+// dconf de l'ancien ordinateur (~/.config/dconf/user), avec sa disposition
+// de clavier et ses profils d'écran.
+func (h Hardware) Resets() []string {
+	out := append([]string{}, hardwarePaths...)
+	if !h.KeepKeyboard {
+		out = append(out, keyboardPaths...)
+	}
+	return out
+}
+
 // Translate filtre (et traduit si besoin) une sortie dconf de la source pour
 // le bureau de la cible. themeExists écarte les thèmes absents de la cible.
-// keepKeyboard reprend la disposition du clavier de la source ; sinon celle
-// de la cible, choisie à son installation, reste en place.
-func Translate(in Dump, src, dst string, themeExists func(kind, name string) bool, keepKeyboard bool) Dump {
+// Sauf si hw.KeepKeyboard, la disposition du clavier est celle de la cible.
+func Translate(in Dump, src, dst string, themeExists func(kind, name string) bool, hw Hardware) Dump {
 	out := translate(in, src, dst, themeExists)
-	if !keepKeyboard {
-		for p := range out {
-			if keep(p, keyboardPaths) {
-				delete(out, p)
-			}
+	for p := range out {
+		if keep(p, hardwarePaths) {
+			delete(out, p)
 		}
+	}
+	if hw.KeepKeyboard {
+		return out
+	}
+	opts := out["org/gnome/desktop/input-sources"]["xkb-options"]
+	for p := range out {
+		if keep(p, keyboardPaths) {
+			delete(out, p)
+		}
+	}
+	if opts != "" {
+		out.set("org/gnome/desktop/input-sources", "xkb-options", opts) // options (touche compose…) : préférences de l'utilisateur
+	}
+	var layouts []string
+	for _, l := range strings.Split(hw.TargetKeyboard, ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			layouts = append(layouts, l)
+		}
+	}
+	if len(layouts) == 0 {
+		return out // inconnue : le bureau prendra celle du système
+	}
+	switch dst {
+	case "gnome":
+		var srcs []string
+		for _, l := range layouts {
+			srcs = append(srcs, "('xkb', '"+escapeGV(l)+"')")
+		}
+		v := "[" + strings.Join(srcs, ", ") + "]"
+		out.set("org/gnome/desktop/input-sources", "sources", v)
+		out.set("org/gnome/desktop/input-sources", "mru-sources", v)
+	case "cinnamon":
+		var ls []string
+		for _, l := range layouts {
+			ls = append(ls, strings.ReplaceAll(l, "+", `\t`))
+		}
+		out.set("org/gnome/libgnomekbd/keyboard", "layouts", gvStrings(ls))
 	}
 	return out
 }

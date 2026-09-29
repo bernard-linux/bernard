@@ -1,5 +1,18 @@
 # Historique des versions
 
+## 0.3.3 — 29 septembre 2026
+
+- **Clavier** : sur un compte créé par Bernard, la disposition de l'ancien
+  ordinateur revenait quand même (clavier français sur un PC à clavier
+  belge). Cause : la base des réglages du bureau (`~/.config/dconf/user`)
+  est copiée avec le dossier personnel, et elle contient la disposition de
+  l'ancien clavier. Bernard vide désormais ces réglages puis impose
+  explicitement la disposition du nouvel ordinateur (les options, comme la
+  touche compose, sont gardées). La case « Reprendre la disposition de
+  l'ancien ordinateur » des options avancées reste disponible.
+- Même traitement pour les profils de couleur des écrans, propres au
+  matériel.
+
 ## 0.3.2 — 27 septembre 2026
 
 - **Câble réseau direct entre les deux ordinateurs** (sans box) : Linux

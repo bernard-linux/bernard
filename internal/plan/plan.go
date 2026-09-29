@@ -82,6 +82,9 @@ type Action struct {
 	// Also : autres paquets que retirerait un retrait (OpRemove), ou
 	// fichiers concernés (OpSystemData, liste courte).
 	Also []string `json:"also,omitempty"`
+	// Note : précision affichée (service arrêté pendant la copie, raison
+	// d'une copie impossible…).
+	Note string `json:"note,omitempty"`
 	// Used : place réellement occupée (OpSystemData), plus petite que Bytes
 	// pour les fichiers creux.
 	Used int64 `json:"used,omitempty"`
@@ -284,6 +287,12 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 			// conseille, à examiner sinon.
 			a.Fidelity, a.To, a.Package = FidelityFull, d.Dest, d.ID
 			a.Selected = it.Advice == inventory.AdviceCopy
+			a.Note = serviceNote(it, inv.Source, t)
+			if it.Kind == inventory.SysDatabase && !sameRelease(inv.Source, t) {
+				// Fichiers de base d'une autre version du système : le
+				// serveur de la cible ne saurait pas forcément les lire.
+				a.Fidelity, a.Selected, a.Package = FidelityNone, false, ""
+			}
 		}
 		add(a)
 	}
@@ -328,6 +337,24 @@ func (p *Plan) fitSystemData() {
 			return
 		}
 	}
+}
+
+// sameRelease : même distribution et même base (nom de code) des deux côtés,
+// donc mêmes versions majeures des serveurs de bases de données.
+func sameRelease(src inventory.Source, t Target) bool {
+	return src.Distro == t.Distro && src.Codename != "" && src.Codename == t.Codename
+}
+
+func serviceNote(it inventory.SystemItem, src inventory.Source, t Target) string {
+	switch {
+	case it.Kind == inventory.SysDatabase && !sameRelease(src, t):
+		return "Versions du système différentes : copie directe risquée, export et import prévus dans une prochaine version."
+	case it.Kind == inventory.SysVM:
+		return "Éteignez les machines virtuelles avant la migration : leurs disques sont copiés tels quels, fichiers creux compris."
+	case it.Service != "":
+		return "Service arrêté quelques minutes sur les deux ordinateurs pendant la copie, puis relancé."
+	}
+	return ""
 }
 
 // appAction applique les règles de la section « Décisions prises » :

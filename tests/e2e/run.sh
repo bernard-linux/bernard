@@ -65,6 +65,13 @@ echo "reglage=e2e" > $SRC/etc/e2e-appli.conf
 echo "version de l'ancien PC" > $SRC/etc/e2e-remplace.conf
 echo "version du nouveau PC" > /etc/e2e-remplace.conf
 echo "plan" > $SRC/data/e2eprojets/plan.txt
+# Couche overlay façon Docker (0.6) : fichier « effacé » et dossier opaque
+# (attribut étendu), plus une ACL sur un fichier de /opt.
+mkdir -p $SRC/var/lib/docker/overlay2/c1/diff/opaque
+mknod $SRC/var/lib/docker/overlay2/c1/diff/efface c 0 0
+python3 -c "import os; os.setxattr('$SRC/var/lib/docker/overlay2/c1/diff/opaque', 'trusted.overlay.opaque', b'y')"
+echo "image" > $SRC/var/lib/docker/overlay2/c1/diff/fichier
+python3 -c "import os; os.setxattr('$SRC/opt/e2eappli/bin/outil', 'user.bernard', b'attribut')"
 BEFORE=$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)
 
 echo "== Migration (nouveau mot de passe demandé pour e2ebob)"
@@ -105,6 +112,9 @@ check "site web copié, propriétaire www-data"     test "$(stat -c %u /var/www/
 check "/etc : réglage ajouté"                     grep -q reglage=e2e /etc/e2e-appli.conf
 check "/etc : réglage de l'ancien PC en place"    grep -q "ancien PC" /etc/e2e-remplace.conf
 check "dossier /data copié"                       test -f /data/e2eprojets/plan.txt
+check "Docker : fichier effacé d'overlay recréé"  test -c /var/lib/docker/overlay2/c1/diff/efface
+check "Docker : dossier opaque (attribut étendu)" python3 -c "import os,sys; sys.exit(os.getxattr('/var/lib/docker/overlay2/c1/diff/opaque','trusted.overlay.opaque')!=b'y')"
+check "attribut étendu d'un fichier de /opt"      python3 -c "import os,sys; sys.exit(os.getxattr('/opt/e2eappli/bin/outil','user.bernard')!=b'attribut')"
 check "source strictement inchangée"             test "$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)" = "$BEFORE"
 
 echo "== Annulation"
@@ -117,10 +127,12 @@ check "/opt : logiciel retiré"                    test ! -e /opt/e2eappli/bin/o
 check "/etc : réglage ajouté retiré"              test ! -e /etc/e2e-appli.conf
 check "/etc : réglage du nouveau PC remis"        grep -q "nouveau PC" /etc/e2e-remplace.conf
 check "dossier /data retiré"                      test ! -e /data/e2eprojets/plan.txt
+check "Docker : données retirées"                 test ! -e /var/lib/docker/overlay2/c1/diff/fichier
 
 # Nettoyage
 rm -rf /home/e2ealice /home/e2ebob "$(dirname "$JOURNAL")" $SRC /opt/e2eappli /var/www/html/e2esite /data/e2eprojets
 rm -f /etc/e2e-remplace.conf /etc/e2e-appli.conf
+rm -rf /var/lib/docker/overlay2/c1
 rmdir /data 2>/dev/null
 crontab -u e2ealice -r 2>/dev/null
 echo

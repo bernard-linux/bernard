@@ -35,6 +35,13 @@ type Server struct {
 	Secrets func() (map[string]string, error)
 	// Extras fournit les réglages lus en administrateur (Wi-Fi, bureau…).
 	Extras func() (any, error)
+	// Prepare est appelé avant de lister un jeu de données qui a un service
+	// (base de données…) : il l'arrête et renvoie de quoi le relancer, ou
+	// refuse (machines virtuelles allumées). Le service est relancé quand le
+	// jeu suivant commence, ou à la fin de la session.
+	Prepare  func(ds inventory.DataSet) (func(), error)
+	prepared string
+	release  func()
 	// OnStatus reçoit l'état annoncé par le nouvel ordinateur (étape en
 	// cours, volume prévu), pour l'afficher côté source.
 	OnStatus func(Status)
@@ -61,7 +68,15 @@ func (s *Server) dataset(id string) (inventory.DataSet, error) {
 // Les réponses sont mises en tampon et envoyées d'un bloc tant que d'autres
 // demandes attendent déjà (le moteur en envoie plusieurs d'avance) : des
 // centaines de petits fichiers partent en quelques paquets réseau.
+func (s *Server) releasePrepared() {
+	if s.release != nil {
+		s.release()
+	}
+	s.release, s.prepared = nil, ""
+}
+
 func (s *Server) Serve(ctx context.Context, conn io.ReadWriter) error {
+	defer s.releasePrepared()
 	br := bufio.NewReaderSize(conn, 64<<10)
 	bw := bufio.NewWriterSize(conn, 256<<10)
 	defer bw.Flush()
@@ -145,6 +160,16 @@ func (s *Server) list(w io.Writer, id string) error {
 	ds, err := s.dataset(id)
 	if err != nil {
 		return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: err.Error()})
+	}
+	if s.prepared != ds.ID {
+		s.releasePrepared()
+		if ds.Service != "" && s.Prepare != nil {
+			rel, err := s.Prepare(ds)
+			if err != nil {
+				return wire.WriteJSON(w, wire.Msg{Type: wire.MsgError, Error: err.Error()})
+			}
+			s.release, s.prepared = rel, ds.ID
+		}
 	}
 	var sendErr error
 	walkErr := source.WalkDataSet(ds.Path, ds.Excluded, ds.Include, func(e source.Entry) error {

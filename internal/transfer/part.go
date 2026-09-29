@@ -130,3 +130,24 @@ func PlaceSymlink(target, dst string) (FileResult, error) {
 	}
 	return res, fmt.Errorf("%s : %w", dst, ErrTooManyNames)
 }
+
+// WhiteoutHash marque dans le journal un fichier « effacé » d'overlay.
+const WhiteoutHash = "whiteout"
+
+// PlaceWhiteout crée un fichier « effacé » d'overlay (périphérique caractère
+// 0:0), sans rien écraser.
+func PlaceWhiteout(dst string) (FileResult, error) {
+	res := FileResult{Hash: WhiteoutHash, Dst: dst}
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeCharDevice != 0 {
+			res.Status = StatusAlreadyPresent
+			return res, nil
+		}
+		return res, fmt.Errorf("%s existe déjà", dst)
+	}
+	if err := syscall.Mknod(dst, syscall.S_IFCHR|0o600, 0); err != nil {
+		return res, err
+	}
+	res.Status = StatusCopied
+	return res, nil
+}

@@ -347,6 +347,21 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 				return fail(e.Rel, err)
 			}
 			tally(rep, res)
+		case source.KindWhiteout:
+			if err := r.makeRoom(dst); err != nil {
+				return fail(e.Rel, err)
+			}
+			res, err := transfer.PlaceWhiteout(dst)
+			if err == nil && res.Status != transfer.StatusAlreadyPresent {
+				err = r.ownerOf(e, owner).Apply(res.Dst)
+			}
+			if err != nil {
+				return fail(e.Rel, err)
+			}
+			if err := r.doneLater(key, res, e); err != nil {
+				return err
+			}
+			tally(rep, res)
 		default:
 			rep.Skipped = append(rep.Skipped, e.Rel)
 		}
@@ -392,7 +407,7 @@ func (r *Receiver) receiveSmall(ctx context.Context, ds string, e source.Entry, 
 		return err
 	}
 	info := st.Info()
-	info.Rel, info.User, info.Group = e.Rel, e.User, e.Group
+	info.Rel, info.User, info.Group, info.Xattrs = e.Rel, e.User, e.Group, e.Xattrs
 	if len(r.batch) == 0 {
 		r.batchSince = time.Now()
 	}
@@ -509,6 +524,9 @@ func (r *Receiver) doneLater(key string, res transfer.FileResult, e source.Entry
 // S'il a changé (reprise après modification sur l'ancienne machine), il est
 // recopié ; l'ancienne copie n'est pas écrasée.
 func sameSource(done journal.Record, e source.Entry) bool {
+	if e.Kind == source.KindWhiteout {
+		return done.Hash == transfer.WhiteoutHash
+	}
 	if e.Kind == source.KindSymlink {
 		return done.Hash == "symlink:"+e.Link
 	}
@@ -668,6 +686,10 @@ func Undo(journalPath string) (*UndoReport, error) {
 }
 
 func unchanged(d journal.Record) bool {
+	if d.Hash == transfer.WhiteoutHash {
+		fi, err := os.Lstat(d.Dst)
+		return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	}
 	if len(d.Hash) > 8 && d.Hash[:8] == "symlink:" {
 		target, err := os.Readlink(d.Dst)
 		return err == nil && "symlink:"+target == d.Hash

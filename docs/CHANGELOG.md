@@ -1,5 +1,32 @@
 # Historique des versions
 
+## 0.6.0 — 29 septembre 2026
+
+**Bases de données, Docker, machines virtuelles, serveurs d'application.**
+Détectés depuis la 0.4, ils sont maintenant copiés, à l'identique et de façon
+cohérente :
+
+- **service arrêté pendant sa copie, des deux côtés**, puis relancé tel
+  qu'il était : MySQL/MariaDB, PostgreSQL, MongoDB, Redis, Docker (et son
+  socket), Podman, serveur FileMaker. On ne copie jamais une base en train
+  d'écrire. Sur l'ancien ordinateur, les données ne sont pas touchées : le
+  service est seulement mis en pause (ancien ordinateur en direct comme
+  paquet sur disque externe) ;
+- **machines virtuelles** (libvirt) : leurs disques sont copiés tels quels,
+  fichiers creux compris, et leurs définitions (dans `/etc/libvirt`)
+  suivent ; libvirt est relancé pour les reprendre. Une machine allumée
+  empêche la copie de ses disques : Bernard le dit (« éteignez-les ») et
+  continue le reste ;
+- **bases de données** : copiées directement quand les deux ordinateurs ont
+  la même base (même distribution, même nom de code), donc la même version
+  du serveur ; sinon elles restent signalées (export et import prévus plus
+  tard).
+
+**Attributs étendus conservés** hors des dossiers personnels : droits
+détaillés (ACL), capacités des programmes (`setcap`), attributs des couches
+Docker. Les fichiers « effacés » des couches overlay (Docker) sont recréés.
+Sans cela, une image Docker copiée serait incohérente.
+
 ## 0.5.1 — 29 septembre 2026
 
 **Dépôts de logiciels ajoutés à la main** (Brave, Chrome, VS Code, Docker,

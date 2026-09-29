@@ -919,10 +919,6 @@ function sysMeta(a) {
   return [size + sparse, files].filter(Boolean).join(", ") + ". " + (ADVICE[a.suggestion] || "");
 }
 const LATER = {
-  database: "Copie avec arrêt du service : prochaine version.",
-  container: "Copie avec arrêt du service : prochaine version.",
-  vm: "Copie des disques virtuels avec arrêt des machines : prochaine version.",
-  appserver: "Copie avec arrêt du serveur : prochaine version.",
   disk: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
   homeelse: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
   steam: "Choix de l'emplacement sur le nouvel ordinateur : prochaine version.",
@@ -938,9 +934,9 @@ function systemDataSection(items) {
     au même endroit, avec ses propriétaires et ses droits ; un fichier déjà présent ici est mis de côté, et
     « Annuler la migration » le remet en place.</p>
     <ul class="list">${items.map(a => a.fidelity === "full"
-      ? row(a, esc(a.label), sysMeta(a) + details(a), tag(a))
+      ? row(a, esc(a.label), sysMeta(a) + (a.note ? " " + esc(a.note) : "") + details(a), tag(a))
       : `<li class="off"><span></span><span><span class="name">${esc(a.label)}</span><br>
-        <span class="meta">${sysMeta(a)} ${LATER[a.reason] || ""}</span>${details(a)}</span>${tag(a)}</li>`).join("")}</ul>`;
+        <span class="meta">${sysMeta(a)} ${esc(a.note || LATER[a.reason] || "")}</span>${details(a)}</span>${tag(a)}</li>`).join("")}</ul>`;
 }
 
 function extraAccountsSection(s) {

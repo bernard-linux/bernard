@@ -1,11 +1,14 @@
 package transfer
 
 import (
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // Owner est le propriétaire final des fichiers écrits en tant que root
@@ -15,6 +18,9 @@ type Owner struct {
 	// Mode, s'il porte des bits spéciaux (setuid, setgid, sticky), est
 	// réappliqué après le changement de propriétaire, qui les efface.
 	Mode fs.FileMode
+	// Xattrs : attributs étendus à poser après le propriétaire (le
+	// changement de propriétaire efface les capacités), valeurs en base64.
+	Xattrs map[string]string
 }
 
 const specialBits = fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
@@ -28,9 +34,22 @@ func (o *Owner) Apply(path string) error {
 	if err := os.Lchown(path, o.UID, o.GID); err != nil {
 		return err
 	}
+	fi, err := os.Lstat(path)
+	if err != nil || fi.Mode()&fs.ModeSymlink != 0 {
+		return nil
+	}
 	if o.Mode&specialBits != 0 {
-		if fi, err := os.Lstat(path); err == nil && fi.Mode()&fs.ModeSymlink == 0 {
-			return os.Chmod(path, o.Mode&(fs.ModePerm|specialBits))
+		if err := os.Chmod(path, o.Mode&(fs.ModePerm|specialBits)); err != nil {
+			return err
+		}
+	}
+	for name, b64 := range o.Xattrs {
+		val, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			continue
+		}
+		if err := syscall.Setxattr(path, name, val, 0); err != nil && !errors.Is(err, syscall.ENOTSUP) {
+			return fmt.Errorf("attribut %s de %s : %w", name, path, err)
 		}
 	}
 	return nil

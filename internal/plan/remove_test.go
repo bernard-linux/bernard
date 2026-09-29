@@ -174,3 +174,28 @@ func TestRepoMakesAppInstallable(t *testing.T) {
 		}
 	}
 }
+
+func TestDatabaseNeedsSameRelease(t *testing.T) {
+	inv, tg := zorinPair()
+	inv.Source.Codename, tg.Codename = "noble", "noble"
+	inv.System = []inventory.SystemItem{{ID: "s1", Kind: inventory.SysDatabase, Label: "Bases MySQL", Paths: []string{"/var/lib/mysql"},
+		Bytes: 1 << 20, Used: 1 << 20, Service: "mysql", Advice: inventory.AdviceCopy}}
+	inv.DataSets = append(inv.DataSets, inventory.DataSet{ID: "x1", Kind: "system", System: "s1", Dest: "/var/lib/mysql", Service: "mysql"})
+	find := func(p *Plan) Action {
+		for _, a := range p.Actions {
+			if a.Op == OpSystemData {
+				return a
+			}
+		}
+		return Action{}
+	}
+	p, _ := Build(inv, tg)
+	if a := find(p); !a.Selected || a.Package != "x1" || a.Note == "" {
+		t.Errorf("même version : copie avec arrêt du service : %+v", a)
+	}
+	tg.Codename = "plucky"
+	p, _ = Build(inv, tg)
+	if a := find(p); a.Selected || a.Package != "" {
+		t.Errorf("versions différentes : pas de copie directe : %+v", a)
+	}
+}

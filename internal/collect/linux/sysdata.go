@@ -145,16 +145,13 @@ var recognizers = []struct {
 	{"var/lib/postgresql", inventory.SysDatabase, "Bases PostgreSQL", "postgresql"},
 	{"var/lib/mongodb", inventory.SysDatabase, "Bases MongoDB", "mongod"},
 	{"var/lib/redis", inventory.SysDatabase, "Données Redis", "redis-server"},
-	{"var/lib/docker", inventory.SysContainer, "Docker : images, conteneurs et volumes", "docker"},
-	{"var/lib/containers", inventory.SysContainer, "Podman : images et conteneurs", ""},
+	{"var/lib/docker", inventory.SysContainer, "Docker : images, conteneurs et volumes", "docker.socket docker"},
+	{"var/lib/containers", inventory.SysContainer, "Podman : images et conteneurs", "podman.socket podman"},
 	{"var/snap/lxd/common/lxd", inventory.SysContainer, "LXD : conteneurs", "snap.lxd.daemon"},
-	{"var/lib/libvirt/images", inventory.SysVM, "Machines virtuelles (libvirt)", "libvirtd"},
+	{"var/lib/libvirt/images", inventory.SysVM, "Machines virtuelles (libvirt)", "libvirtd"}, // définitions : dans /etc
 	{"opt/FileMaker/FileMaker Server/Data", inventory.SysAppServer, "Serveur FileMaker : bases et réglages", "fmshelper"},
 	{"var/www", inventory.SysWeb, "Sites web (/var/www)", ""},
 }
-
-// Définitions des machines virtuelles libvirt, à reprendre avec les disques.
-const libvirtDefs = "etc/libvirt/qemu"
 
 // usage mesure un dossier : fichiers, taille apparente, place occupée.
 type usage struct{ files, bytes, used int64 }
@@ -208,6 +205,8 @@ type scanner struct {
 var copyable = map[string]bool{
 	inventory.SysEtc: true, inventory.SysOpt: true, inventory.SysSrv: true, inventory.SysLocal: true,
 	inventory.SysWeb: true, inventory.SysCustom: true, inventory.SysRoot: true, inventory.SysService: true,
+	// Depuis la 0.6 : service arrêté pendant la copie.
+	inventory.SysDatabase: true, inventory.SysContainer: true, inventory.SysVM: true, inventory.SysAppServer: true,
 }
 
 // Copyable indique si un genre de données est copié par cette version.
@@ -242,7 +241,7 @@ func (s *scanner) addWith(it inventory.SystemItem, include []string) {
 		s.datasets = append(s.datasets, inventory.DataSet{
 			ID: "x" + strconv.Itoa(len(s.datasets)+1), Kind: "system", System: it.ID,
 			Path: filepath.Join(s.root, it.Paths[0]), Dest: it.Paths[0],
-			Files: it.Files, SizeBytes: it.Bytes, Include: include,
+			Files: it.Files, SizeBytes: it.Bytes, Include: include, Service: it.Service,
 		})
 	}
 }
@@ -322,12 +321,8 @@ func (s *scanner) recognized() {
 			continue
 		}
 		u := s.measure(r.rel, nil)
-		it := inventory.SystemItem{Kind: r.kind, Label: r.label, Paths: []string{s.abs(r.rel)},
-			Files: u.files, Bytes: u.bytes, Used: u.used, Service: r.service}
-		if r.kind == inventory.SysVM && s.exists(libvirtDefs) {
-			it.Paths = append(it.Paths, s.abs(libvirtDefs))
-		}
-		s.add(it)
+		s.add(inventory.SystemItem{Kind: r.kind, Label: r.label, Paths: []string{s.abs(r.rel)},
+			Files: u.files, Bytes: u.bytes, Used: u.used, Service: r.service})
 	}
 }
 

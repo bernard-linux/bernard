@@ -273,8 +273,8 @@ func TestScanSystem(t *testing.T) {
 	if d := setBy["/opt/monlogiciel"]; d.Include != nil {
 		t.Errorf("/opt/monlogiciel : aucun fichier de paquet, tout copier : %+v", d.Include)
 	}
-	if _, ok := setBy["/var/lib/mysql"]; ok {
-		t.Error("les bases sont copiées en 0.6, avec arrêt du service")
+	if d := setBy["/var/lib/mysql"]; d.Service != "mysql" {
+		t.Errorf("base MySQL : copiée avec arrêt du service : %+v", d)
 	}
 	byLabel := map[string]inventory.SystemItem{}
 	for _, it := range items {

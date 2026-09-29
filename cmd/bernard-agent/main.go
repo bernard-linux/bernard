@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/keepawake"
 	"github.com/bernard-linux/bernard/internal/pack"
 	"github.com/bernard-linux/bernard/internal/remote"
+	"github.com/bernard-linux/bernard/internal/services"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/version"
 )
@@ -301,7 +303,7 @@ func runPack(ctx context.Context, args []string) int {
 	} else {
 		fmt.Println("Remarque : sans sudo, ni les mots de passe, ni les réglages du bureau, ni le Wi-Fi ne seront inclus.")
 	}
-	rep, err := pack.Write(ctx, inv, *dest, pass, pack.WriteOptions{Extras: extras, Secrets: secrets, OnFile: func(string, int64) {
+	rep, err := pack.Write(ctx, inv, *dest, pass, pack.WriteOptions{Extras: extras, Secrets: secrets, Prepare: packPrepare(ctx), OnFile: func(string, int64) {
 		if files++; files%200 == 0 {
 			fmt.Printf("  %d fichiers écrits\n", files)
 		}
@@ -342,4 +344,14 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%d h", h)
 	}
 	return fmt.Sprintf("%d h %02d", h, m)
+}
+
+// packPrepare arrête les services (bases…) pendant l'écriture de leurs
+// données dans le paquet, sur la machine courante en administrateur.
+func packPrepare(ctx context.Context) func(inventory.DataSet) (func(), error) {
+	f := services.PrepareFor(ctx, os.Geteuid() == 0 && filepath.Clean(sourceRoot) == "/")
+	if f == nil {
+		return nil
+	}
+	return func(ds inventory.DataSet) (func(), error) { return f(ds.Service) }
 }

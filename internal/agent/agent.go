@@ -16,6 +16,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/link"
 	"github.com/bernard-linux/bernard/internal/remote"
+	"github.com/bernard-linux/bernard/internal/services"
 	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/version"
@@ -49,6 +50,10 @@ func NewServer(ctx context.Context, inv *inventory.Inventory, root string, onFil
 		srv.Secrets = func() (map[string]string, error) { return linux.ReadPasswordHashes(root, logins) }
 		srv.Extras = func() (any, error) {
 			return linux.CollectExtras(ctx, root, inv.Source.Desktop, inv.Users, sysexec.Run), nil
+		}
+		if filepath.Clean(root) == "/" {
+			svc := services.New()
+			srv.Prepare = func(ds inventory.DataSet) (func(), error) { return svc.Pause(ctx, ds.Service) }
 		}
 	}
 	return srv

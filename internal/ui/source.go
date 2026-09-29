@@ -17,6 +17,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/pack"
 	"github.com/bernard-linux/bernard/internal/remote"
+	"github.com/bernard-linux/bernard/internal/services"
 	"github.com/bernard-linux/bernard/internal/session"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
@@ -448,7 +449,7 @@ func (c *Controller) StartPack(disk, passphrase string) error {
 		}
 		secrets, _ := linux.ReadPasswordHashes(sourceRoot(), logins)
 		extras := linux.CollectExtras(ctx, sourceRoot(), inv.Source.Desktop, inv.Users, sysexec.Run)
-		rep, err := pack.Write(ctx, inv, dest, passphrase, pack.WriteOptions{Secrets: secrets, Extras: extras,
+		rep, err := pack.Write(ctx, inv, dest, passphrase, pack.WriteOptions{Secrets: secrets, Extras: extras, Prepare: packPrepare(ctx, sourceRoot()),
 			OnFile: func(rel string, n int64) {
 				c.update(func(s *State) { s.Send.Files++; s.Send.Bytes += n; s.Send.Rel = rel })
 			}})
@@ -478,4 +479,14 @@ func human(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %co", float64(b)/float64(div), "kMGTPE"[exp])
+}
+
+// packPrepare arrête les services (bases…) pendant l'écriture de leurs
+// données dans le paquet.
+func packPrepare(ctx context.Context, root string) func(inventory.DataSet) (func(), error) {
+	f := services.PrepareFor(ctx, os.Geteuid() == 0 && filepath.Clean(root) == "/")
+	if f == nil {
+		return nil
+	}
+	return func(ds inventory.DataSet) (func(), error) { return f(ds.Service) }
 }

@@ -59,6 +59,16 @@ les fichiers creux (disques virtuels) devront être copiés creux.
   `/var/www`, `/var/lib/…` (sauf dpkg, apt, snapd, flatpak, systemd,
   bernard), `/root`, `/home/…` sans compte, dossiers ajoutés à la racine.
 
+## Services (version 0.6)
+
+- Jeux de données avec `Service` : unités systemd arrêtées sur la source
+  pendant leur lecture (relancées au jeu suivant ou en fin de session), et
+  sur la cible pendant l'écriture.
+- `libvirtd` : pas d'arrêt ; refus si une machine virtuelle tourne.
+- Bases : copie directe seulement entre systèmes de même base (nom de code).
+- Attributs étendus (ACL, capacités, overlay) et fichiers « effacés »
+  d'overlay (périphérique caractère 0:0) transportés.
+
 ## Suite
 
 - 0.5.x : dépôts de logiciels tiers et leurs clés ; liens durs, ACL et

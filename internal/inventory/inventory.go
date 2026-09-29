@@ -116,6 +116,10 @@ type DataSet struct {
 	Dest string `json:"dest,omitempty"`
 	// System : identifiant du SystemItem que ce jeu de données copie.
 	System string `json:"system,omitempty"`
+	// Service : unités systemd à arrêter pendant la copie, des deux côtés
+	// (« mysql », « docker.socket docker ») ; « libvirtd » : machines
+	// virtuelles à éteindre.
+	Service string `json:"service,omitempty"`
 }
 
 // Genres de données hors des dossiers personnels.

@@ -16,6 +16,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/inventory"
 	"github.com/bernard-linux/bernard/internal/journal"
 	"github.com/bernard-linux/bernard/internal/plan"
+	"github.com/bernard-linux/bernard/internal/services"
 	"github.com/bernard-linux/bernard/internal/source"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 	"github.com/bernard-linux/bernard/internal/transfer"
@@ -99,7 +100,7 @@ func ownerByName() func(source.Entry) *transfer.Owner {
 		return g.Gid, nil
 	}
 	return func(e source.Entry) *transfer.Owner {
-		return &transfer.Owner{UID: lookup(uids, e.User, uid), GID: lookup(gids, e.Group, gid), Mode: e.Mode}
+		return &transfer.Owner{UID: lookup(uids, e.User, uid), GID: lookup(gids, e.Group, gid), Mode: e.Mode, Xattrs: e.Xattrs}
 	}
 }
 
@@ -214,8 +215,22 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 			}
 			ds.Include = keep
 		}
+		svc := services.New()
+		if ds.Service != "" {
+			svc.Stop(ctx, ds.Service) // service de la cible arrêté pendant qu'on dépose ses données
+		}
 		rep, err := r.CopyDataSetAs(ctx, ds, ds.Dest, nil)
+		if ds.Service != "" {
+			svc.Start(ctx, ds.Service)
+		}
 		out[ds.ID] = rep
+		var fe *source.FileError
+		if errors.As(err, &fe) {
+			// Refus de la source pour ce jeu (machines virtuelles allumées,
+			// service impossible à arrêter) : signalé, la suite continue.
+			rep.Errors = append(rep.Errors, transfer.FileError{Path: ds.Dest, Err: fe.Msg})
+			continue
+		}
 		if err != nil {
 			return out, fmt.Errorf("%s : %w", ds.Dest, err)
 		}

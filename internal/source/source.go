@@ -8,6 +8,7 @@ package source
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,9 @@ const (
 	KindFile    = "file"
 	KindSymlink = "symlink"
 	KindOther   = "other" // socket, tube, périphérique : non migrable
+	// KindWhiteout : fichier « effacé » d'une couche overlay (périphérique
+	// caractère 0:0), indispensable aux images Docker.
+	KindWhiteout = "whiteout"
 	// KindUnreadable : la source n'a pas pu lire l'élément ; le message
 	// d'erreur est placé dans Entry.Link.
 	KindUnreadable = "unreadable"
@@ -49,6 +53,9 @@ type Entry struct {
 	// personnels, où chaque fichier garde son propriétaire (mysql, www-data…).
 	User  string `json:"user,omitempty"`
 	Group string `json:"group,omitempty"`
+	// Xattrs : attributs étendus (ACL, capacités, attributs overlay de
+	// Docker…), valeurs en base64. Absents pour les liens symboliques.
+	Xattrs map[string]string `json:"xattrs,omitempty"`
 }
 
 // FileStream est le contenu d'un fichier à partir d'un décalage. Après avoir
@@ -138,11 +145,56 @@ func Walk(root string, excludes []string, fn func(Entry) error, onErr func(rel s
 				}
 				return nil
 			}
+		case info.Mode()&fs.ModeCharDevice != 0 && isWhiteout(info):
+			e.Kind = KindWhiteout
 		default:
 			e.Kind = KindOther
 		}
+		if e.Kind == KindDir || e.Kind == KindFile || e.Kind == KindWhiteout {
+			e.Xattrs = readXattrs(path)
+		}
 		return fn(e)
 	})
+}
+
+func isWhiteout(info os.FileInfo) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Rdev == 0
+}
+
+// readXattrs lit les attributs étendus d'un fichier (sans les étiquettes
+// SELinux, propres à chaque machine).
+func readXattrs(path string) map[string]string {
+	size, err := syscall.Listxattr(path, nil)
+	if err != nil || size <= 0 {
+		return nil
+	}
+	buf := make([]byte, size)
+	size, err = syscall.Listxattr(path, buf)
+	if err != nil {
+		return nil
+	}
+	var out map[string]string
+	for _, name := range strings.Split(string(buf[:size]), "\x00") {
+		if name == "" || name == "security.selinux" {
+			continue
+		}
+		n, err := syscall.Getxattr(path, name, nil)
+		if err != nil || n < 0 {
+			continue
+		}
+		val := make([]byte, n)
+		if n > 0 {
+			if n, err = syscall.Getxattr(path, name, val); err != nil {
+				continue
+			}
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[name] = base64.StdEncoding.EncodeToString(val[:n])
+	}
+	return out
 }
 
 var (

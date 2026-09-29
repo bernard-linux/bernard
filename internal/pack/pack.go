@@ -153,6 +153,9 @@ type WriteOptions struct {
 	Secrets map[string]string
 	Extras  any
 	OnFile  func(rel string, size int64)
+	// Prepare arrête le service d'un jeu de données pendant son écriture
+	// (voir remote.Server.Prepare).
+	Prepare func(ds inventory.DataSet) (func(), error)
 }
 
 // WriteReport résume l'écriture.
@@ -263,6 +266,16 @@ func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string
 
 	for _, ds := range inv.DataSets {
 		var list []entry
+		release := func() {}
+		if ds.Service != "" && opt.Prepare != nil {
+			rel, err := opt.Prepare(ds)
+			if err != nil {
+				rep.Errors = append(rep.Errors, ds.Dest+" : "+err.Error())
+				man.Entries[ds.ID] = nil
+				continue
+			}
+			release = rel
+		}
 		walkErr := source.WalkDataSet(ds.Path, ds.Excluded, ds.Include, func(e source.Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -293,6 +306,7 @@ func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string
 			list = append(list, entry{Entry: source.Entry{Rel: rel, Kind: source.KindUnreadable}, Error: err.Error()})
 			rep.Errors = append(rep.Errors, rel+" : "+err.Error())
 		})
+		release()
 		if walkErr != nil {
 			ow.close()
 			return rep, walkErr

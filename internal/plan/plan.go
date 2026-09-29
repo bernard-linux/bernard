@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
@@ -35,6 +36,7 @@ const (
 	OpAutoLoginOff = "autoLoginOff" // ne plus ouvrir seule la session d'un compte non migré
 	OpSystemData   = "systemData"   // données hors des dossiers personnels
 	OpAddRepo      = "addRepo"      // ajouter un dépôt de logiciels de l'ancien ordinateur
+	OpAttachDisk   = "attachDisk"   // rattacher tel quel un disque déplacé dans ce PC
 	OpSkip         = "skip"         // rien à faire (déjà présent, technique…)
 	OpReview       = "review"       // action manuelle proposée à l'utilisateur
 )
@@ -111,6 +113,10 @@ type Target struct {
 	GPUs             []string          `json:"gpus,omitempty"`
 	// Codename : nom de code Ubuntu/Debian de la cible (« noble »).
 	Codename string `json:"codename,omitempty"`
+	// UUIDs : systèmes de fichiers présents sur la cible (disque déplacé).
+	UUIDs map[string]bool `json:"-"`
+	// DataMounts : disques de données de la cible, avec leur place libre.
+	DataMounts []Mount `json:"dataMounts,omitempty"`
 	// KnownRepos : adresses des dépôts déjà configurés sur la cible.
 	KnownRepos map[string]bool `json:"-"`
 	// AutoLoginUser : compte dont la session s'ouvre seule au démarrage.
@@ -128,6 +134,12 @@ type Target struct {
 	RemovalImpact func(pkg string) ([]string, error) `json:"-"`
 	// FlatpakNames : identifiant → nom, pour les applications Flatpak de la cible.
 	FlatpakNames map[string]string `json:"-"`
+}
+
+// Mount est un disque de données de la cible.
+type Mount struct {
+	Point string `json:"point"`
+	Free  int64  `json:"free"`
 }
 
 // Totals résume le volume à transférer.
@@ -282,6 +294,10 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	for _, it := range inv.System {
 		a := Action{Op: OpSystemData, From: it.ID, Label: it.Label, Files: it.Files, Bytes: it.Bytes, Used: it.Used,
 			Reason: it.Kind, Suggestion: it.Advice, Also: it.Detail, Fidelity: FidelityNone}
+		if diskKinds[it.Kind] {
+			add(diskAction(it, sysSets[it.ID], inv, t))
+			continue
+		}
 		if d, ok := sysSets[it.ID]; ok {
 			// Copié à l'identique, au même endroit ; coché quand Bernard le
 			// conseille, à examiner sinon.
@@ -337,6 +353,70 @@ func (p *Plan) fitSystemData() {
 			return
 		}
 	}
+}
+
+var diskKinds = map[string]bool{
+	inventory.SysDisk: true, inventory.SysHomeElse: true, inventory.SysSteam: true, inventory.SysBackup: true,
+}
+
+// onDataMount : la destination est sur un autre disque de la cible (sa
+// place ne se compte pas sur celle du disque système).
+func onDataMount(dest string, mounts []Mount) bool {
+	for _, m := range mounts {
+		if dest == m.Point || strings.HasPrefix(dest, m.Point+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// AttachPoint : point de montage d'un disque rattaché. Les montages
+// automatiques (/media/<compte>/…) sont éphémères : le disque est monté à
+// demeure dans /mnt.
+func AttachPoint(src string) string {
+	if strings.HasPrefix(src, "/media/") || strings.HasPrefix(src, "/run/media/") {
+		return "/mnt/" + path.Base(src)
+	}
+	return src
+}
+
+// diskAction décide du sort d'un autre disque de l'ancien ordinateur :
+// rattaché tel quel s'il a été déplacé dans ce PC, sinon copié sur le disque
+// de données le plus libre de la cible, ou à défaut dans le dossier personnel
+// du premier compte (dossier « Disques »).
+func diskAction(it inventory.SystemItem, ds inventory.DataSet, inv *inventory.Inventory, t Target) Action {
+	a := Action{Op: OpSystemData, From: it.ID, Label: it.Label, Files: it.Files, Bytes: it.Bytes, Used: it.Used,
+		Reason: it.Kind, Suggestion: it.Advice, Fidelity: FidelityNone}
+	if it.UUID != "" && t.UUIDs[it.UUID] {
+		a.Op, a.To, a.Fidelity, a.Selected = OpAttachDisk, AttachPoint(it.Paths[0]), FidelityFull, true
+		a.Note = "Ce disque est branché sur ce PC : il sera monté tel quel dans " + a.To + ", à chaque démarrage, sans rien copier."
+		return a
+	}
+	if ds.ID == "" {
+		return a
+	}
+	name := path.Base(it.Paths[0])
+	var best Mount
+	for _, m := range t.DataMounts {
+		if m.Free > best.Free {
+			best = m
+		}
+	}
+	switch {
+	case best.Point != "" && best.Free > it.Used:
+		a.To = path.Join(best.Point, name)
+	case len(inv.Users) > 0:
+		a.To = path.Join(t.HomeRoot, inv.Users[0].Login, "Disques", name)
+	default:
+		return a
+	}
+	a.Fidelity, a.Package = FidelityFull, ds.ID
+	a.Selected = it.Advice == inventory.AdviceCopy
+	a.Note = "Copié dans " + a.To + "."
+	if it.Kind == inventory.SysBackup {
+		a.Note += " Copie déconseillée si les données qu'il protège sont déjà migrées."
+	}
+	return a
 }
 
 // sameRelease : même distribution et même base (nom de code) des deux côtés,
@@ -421,7 +501,7 @@ func (p *Plan) checkSpace() {
 		switch {
 		case a.Op == OpCopy && a.Selected:
 			need += a.Bytes
-		case a.Op == OpSystemData && a.Selected:
+		case a.Op == OpSystemData && a.Selected && !onDataMount(a.To, p.Target.DataMounts):
 			need += a.Used
 		case a.Op == OpRemove && a.Selected:
 			p.Freed += a.Bytes

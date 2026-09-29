@@ -199,3 +199,56 @@ func TestDatabaseNeedsSameRelease(t *testing.T) {
 		t.Errorf("versions différentes : pas de copie directe : %+v", a)
 	}
 }
+
+func TestOtherDisks(t *testing.T) {
+	inv, tg := zorinPair()
+	inv.System = []inventory.SystemItem{
+		{ID: "s1", Kind: inventory.SysSteam, Label: "Bibliothèque de jeux (/media/arnaud/Jeux)", Paths: []string{"/media/arnaud/Jeux"},
+			Bytes: 300 << 30, Used: 300 << 30, Advice: inventory.AdviceCopy, UUID: "1111-AAAA", FSType: "ext4"},
+		{ID: "s2", Kind: inventory.SysBackup, Label: "Disque de sauvegarde (/media/arnaud/Sauve)", Paths: []string{"/media/arnaud/Sauve"},
+			Bytes: 1 << 40, Used: 1 << 40, Advice: inventory.AdviceSkip, UUID: "2222-BBBB"},
+	}
+	inv.DataSets = append(inv.DataSets,
+		inventory.DataSet{ID: "x1", Kind: "system", System: "s1", Dest: "/media/arnaud/Jeux"},
+		inventory.DataSet{ID: "x2", Kind: "system", System: "s2", Dest: "/media/arnaud/Sauve"})
+	by := func(p *Plan) map[string]Action {
+		m := map[string]Action{}
+		for _, a := range p.Actions {
+			if a.From == "s1" || a.From == "s2" {
+				m[a.From] = a
+			}
+		}
+		return m
+	}
+	// Disque de jeux déplacé dans le nouveau PC : rattaché dans /mnt.
+	tg.UUIDs = map[string]bool{"1111-AAAA": true}
+	m := by(mustBuild(t, inv, tg))
+	if a := m["s1"]; a.Op != OpAttachDisk || a.To != "/mnt/Jeux" || !a.Selected {
+		t.Errorf("rattachement : %+v", a)
+	}
+	// Pas déplacé, un disque de données libre ici : copié dessus.
+	tg.UUIDs = nil
+	tg.DataMounts = []Mount{{Point: "/data", Free: 2 << 40}}
+	m = by(mustBuild(t, inv, tg))
+	if a := m["s1"]; a.Op != OpSystemData || a.To != "/data/Jeux" || !a.Selected {
+		t.Errorf("copie sur le disque de données : %+v", a)
+	}
+	if a := m["s2"]; a.Selected {
+		t.Errorf("sauvegarde : jamais cochée d'office : %+v", a)
+	}
+	// Sans autre disque : dans le dossier personnel, dossier Disques.
+	tg.DataMounts = nil
+	m = by(mustBuild(t, inv, tg))
+	if a := m["s1"]; a.To != "/home/arnaud/Disques/Jeux" {
+		t.Errorf("copie dans le dossier personnel : %+v", a)
+	}
+}
+
+func mustBuild(t *testing.T, inv *inventory.Inventory, tg Target) *Plan {
+	t.Helper()
+	p, err := Build(inv, tg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

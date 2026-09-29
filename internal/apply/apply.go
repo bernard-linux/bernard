@@ -331,6 +331,9 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 		}
 	}
 	userExists := func(login string) bool { return a.Sys.UserExists(ctx, login) }
+	if err := a.attachDisks(ctx, p, inv, rep); err != nil {
+		return rep, err
+	}
 
 	for _, act := range p.Actions {
 		if !act.Selected {
@@ -477,6 +480,10 @@ func UndoSystem(ctx context.Context, st *journal.State, sys *system.System, sa *
 	for i := len(st.Sys) - 1; i >= 0; i-- {
 		r := st.Sys[i]
 		switch r.Op {
+		case journal.SysFstab:
+			if err := undoFstab(ctx, r); err != nil {
+				fail("disque "+r.Key, err)
+			}
 		case journal.SysRepoAdded, journal.SysKeyAdded:
 			if err := removeAdded(r.Name); err != nil {
 				fail(r.Name, err)

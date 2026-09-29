@@ -166,6 +166,10 @@ type SystemItem struct {
 	Advice  string `json:"advice"`
 	// Detail : liste des fichiers concernés quand elle est courte (/etc).
 	Detail []string `json:"detail,omitempty"`
+	// Pour un autre disque : identifiant du système de fichiers (reconnu si
+	// le disque est déplacé dans le nouvel ordinateur) et son type.
+	UUID   string `json:"uuid,omitempty"`
+	FSType string `json:"fstype,omitempty"`
 }
 
 // Disk est un système de fichiers monté sur la source.
@@ -174,6 +178,7 @@ type Disk struct {
 	Mount  string `json:"mount"`
 	FSType string `json:"fstype"`
 	Label  string `json:"label,omitempty"`
+	UUID   string `json:"uuid,omitempty"`
 	Size   int64  `json:"size"`
 	Used   int64  `json:"used"`
 	Role   string `json:"role"` // system, home, boot, data

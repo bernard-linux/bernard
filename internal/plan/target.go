@@ -74,6 +74,7 @@ func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 	t.SnapInstalled, _ = sn.Installed(ctx)
 
 	t.KnownRepos = aptrepo.Known("/")
+	t.UUIDs, t.DataMounts = detectDisks()
 	t.Keyboard = hardware.Keyboard("/")
 	t.GPUs = hardware.GPUs("/")
 	if al := settings.DetectAutoLogin("/"); al != nil {
@@ -206,4 +207,35 @@ func desktopName(path string) (string, bool) {
 		name = nameFR
 	}
 	return name, name != ""
+}
+
+// detectDisks relève les systèmes de fichiers présents (par identifiant)
+// et les disques de données montés, avec leur place libre.
+func detectDisks() (map[string]bool, []Mount) {
+	uuids := map[string]bool{}
+	entries, _ := os.ReadDir("/dev/disk/by-uuid")
+	for _, e := range entries {
+		uuids[e.Name()] = true
+	}
+	var mounts []Mount
+	b, _ := os.ReadFile("/proc/self/mounts")
+	seen := map[string]bool{}
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 || !strings.HasPrefix(f[0], "/dev/") || f[2] == "squashfs" || f[2] == "iso9660" || f[2] == "vfat" {
+			continue
+		}
+		p := f[1]
+		// Disques amovibles (clé USB, disque du paquet) : jamais une destination.
+		if p == "/" || p == "/home" || strings.HasPrefix(p, "/boot") || strings.HasPrefix(p, "/snap") ||
+			strings.HasPrefix(p, "/media/") || strings.HasPrefix(p, "/run/") || seen[p] {
+			continue
+		}
+		seen[p] = true
+		var st syscall.Statfs_t
+		if syscall.Statfs(p, &st) == nil {
+			mounts = append(mounts, Mount{Point: p, Free: int64(st.Bavail) * int64(st.Bsize)})
+		}
+	}
+	return uuids, mounts
 }

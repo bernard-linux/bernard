@@ -207,6 +207,8 @@ var copyable = map[string]bool{
 	inventory.SysWeb: true, inventory.SysCustom: true, inventory.SysRoot: true, inventory.SysService: true,
 	// Depuis la 0.6 : service arrêté pendant la copie.
 	inventory.SysDatabase: true, inventory.SysContainer: true, inventory.SysVM: true, inventory.SysAppServer: true,
+	// Depuis la 0.6.1 : autres disques, copiés ailleurs ou rattachés tels quels.
+	inventory.SysDisk: true, inventory.SysHomeElse: true, inventory.SysSteam: true, inventory.SysBackup: true,
 }
 
 // Copyable indique si un genre de données est copié par cette version.
@@ -517,13 +519,15 @@ func statfs(p string) (size, used int64) {
 func (s *scanner) disks(mountsFile string) ([]inventory.Disk, map[string]bool) {
 	points := map[string]bool{}
 	var out []inventory.Disk
+	uuids := ReadUUIDs("/dev/disk/by-uuid")
 	for _, m := range readMounts(mountsFile) {
 		if m.fstype == "squashfs" || m.fstype == "iso9660" || points[m.point] {
 			continue // snaps, CD-ROM
 		}
 		points[m.point] = true
 		size, used := statfs(m.point)
-		d := inventory.Disk{Device: m.device, Mount: m.point, FSType: m.fstype, Size: size, Used: used, Role: diskRole(m.point)}
+		d := inventory.Disk{Device: m.device, Mount: m.point, FSType: m.fstype, Size: size, Used: used, Role: diskRole(m.point),
+			UUID: uuids[resolveDev(m.device)]}
 		out = append(out, d)
 		if d.Role != "data" {
 			continue
@@ -535,9 +539,30 @@ func (s *scanner) disks(mountsFile string) ([]inventory.Disk, map[string]bool) {
 			inventory.SysHomeElse: "Dossier personnel sur un autre disque",
 			inventory.SysDisk:     "Autre disque",
 		}[kind] + " (" + m.point + ")"
-		s.add(inventory.SystemItem{Kind: kind, Label: label, Paths: []string{m.point}, Bytes: used, Used: used, Advice: advice})
+		s.add(inventory.SystemItem{Kind: kind, Label: label, Paths: []string{m.point}, Bytes: used, Used: used, Advice: advice,
+			UUID: d.UUID, FSType: m.fstype})
 	}
 	return out, points
+}
+
+// ReadUUIDs associe chaque périphérique (chemin réel) à l'identifiant de
+// son système de fichiers, d'après les liens de /dev/disk/by-uuid.
+func ReadUUIDs(dir string) map[string]string {
+	out := map[string]string{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if dev, err := filepath.EvalSymlinks(filepath.Join(dir, e.Name())); err == nil {
+			out[dev] = e.Name()
+		}
+	}
+	return out
+}
+
+func resolveDev(dev string) string {
+	if r, err := filepath.EvalSymlinks(dev); err == nil {
+		return r
+	}
+	return dev
 }
 
 // ---------------------------------------------------------------- Steam

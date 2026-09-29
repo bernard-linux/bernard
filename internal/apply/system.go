@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/bernard-linux/bernard/internal/collect/linux"
 	"github.com/bernard-linux/bernard/internal/engine"
@@ -19,6 +20,7 @@ import (
 	"github.com/bernard-linux/bernard/internal/services"
 	"github.com/bernard-linux/bernard/internal/source"
 	"github.com/bernard-linux/bernard/internal/sysexec"
+	"github.com/bernard-linux/bernard/internal/system"
 	"github.com/bernard-linux/bernard/internal/transfer"
 )
 
@@ -26,7 +28,7 @@ import (
 // personnels. La destination vient de l'ancien ordinateur : elle est
 // vérifiée ici, pour qu'aucune donnée ne puisse atterrir dans le système
 // lui-même (/usr, /bin, /boot…).
-var systemDestAllowed = []string{"/etc", "/opt/", "/srv/", "/usr/local", "/var/www", "/var/lib/", "/root", "/home/"}
+var systemDestAllowed = []string{"/etc", "/opt/", "/srv/", "/usr/local", "/var/www", "/var/lib/", "/root", "/home/", "/mnt/"}
 
 var systemDestDenied = []string{"/var/lib/dpkg", "/var/lib/apt", "/var/lib/bernard", "/var/lib/snapd", "/var/lib/flatpak", "/var/lib/systemd"}
 
@@ -198,6 +200,10 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 		if !ok {
 			continue
 		}
+		oldPath := ds.Dest
+		if act.To != "" {
+			ds.Dest = act.To // autre disque : destination choisie sur la cible
+		}
 		if !SystemDestOK(ds.Dest, homes) {
 			out[ds.ID] = &transfer.TreeReport{Errors: []transfer.FileError{{Path: ds.Dest, Err: "emplacement refusé"}}}
 			continue
@@ -234,6 +240,9 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 		if err != nil {
 			return out, fmt.Errorf("%s : %w", ds.Dest, err)
 		}
+		if ds.Dest != oldPath {
+			RewriteSteam(inv, oldPath, ds.Dest)
+		}
 	}
 	if etc {
 		// Services ajoutés ou modifiés dans /etc/systemd : pris en compte.
@@ -266,4 +275,39 @@ func UndoReplaced(st *journal.State) (restored []string, errs []string) {
 		restored = append(restored, r.Name)
 	}
 	return restored, errs
+}
+
+// Fichiers où Steam liste ses bibliothèques, relatifs au dossier personnel.
+var steamVDF = []string{".local/share/Steam/steamapps/libraryfolders.vdf", ".steam/steam/steamapps/libraryfolders.vdf",
+	".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf",
+	".local/share/Steam/config/libraryfolders.vdf"}
+
+// RewriteSteam met à jour l'emplacement d'une bibliothèque Steam déplacée
+// (autre disque copié ou rattaché ailleurs), pour que Steam la retrouve.
+func RewriteSteam(inv *inventory.Inventory, oldPath, newPath string) {
+	if oldPath == newPath || oldPath == "" {
+		return
+	}
+	for _, u := range inv.Users {
+		_, _, home, err := system.Owner(u.Login)
+		if err != nil {
+			continue
+		}
+		for _, rel := range steamVDF {
+			f := filepath.Join(home, rel)
+			b, err := os.ReadFile(f)
+			if err != nil || !strings.Contains(string(b), `"`+oldPath) {
+				continue
+			}
+			out := strings.ReplaceAll(string(b), `"`+oldPath+`"`, `"`+newPath+`"`)
+			out = strings.ReplaceAll(out, `"`+oldPath+`/`, `"`+newPath+`/`)
+			fi, _ := os.Stat(f)
+			if os.WriteFile(f+".bernard-tmp", []byte(out), fi.Mode().Perm()) == nil {
+				if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+					os.Chown(f+".bernard-tmp", int(st.Uid), int(st.Gid))
+				}
+				os.Rename(f+".bernard-tmp", f)
+			}
+		}
+	}
 }

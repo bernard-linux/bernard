@@ -57,6 +57,9 @@ const (
 	// chemin), retiré par l'annulation.
 	SysRepoAdded = "repoAdded"
 	SysKeyAdded  = "keyAdded"
+	// SysFstab : disque rattaché. Name = identifiant, Dst = sauvegarde de
+	// /etc/fstab, Key = point de montage.
+	SysFstab = "fstab"
 )
 
 // Record est une ligne du journal.

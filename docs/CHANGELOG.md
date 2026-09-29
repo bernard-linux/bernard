@@ -1,5 +1,25 @@
 # Historique des versions
 
+## 0.6.1 — 29 septembre 2026
+
+**Autres disques de l'ancien ordinateur** (disque de jeux, dossier personnel
+placé sur un second disque, disque de données, disque de sauvegarde) :
+
+- **disque déplacé dans le nouveau PC** : Bernard le reconnaît (identifiant
+  du système de fichiers) et propose de le **rattacher tel quel**, sans rien
+  copier : il est monté à chaque démarrage (dans `/mnt/<nom>` s'il était
+  monté automatiquement dans `/media`). `/etc/fstab` est sauvegardé avant, et
+  « Annuler la migration » le remet. Disques FAT, exFAT et NTFS : attribués
+  au premier compte, pour qu'il puisse y écrire ;
+- **disque resté dans l'ancien PC** : son contenu est copié sur le disque de
+  données le plus libre du nouveau PC (jamais sur une clé USB), ou à défaut
+  dans `~/Disques/<nom>` du premier compte ;
+- **bibliothèques Steam** : après copie ou rattachement ailleurs, Steam est
+  mis à jour avec leur nouvel emplacement ;
+- les disques de sauvegarde ne sont jamais cochés d'office ;
+- la place d'une copie vers un autre disque n'est plus comptée sur celle du
+  disque système.
+
 ## 0.6.0 — 29 septembre 2026
 
 **Bases de données, Docker, machines virtuelles, serveurs d'application.**

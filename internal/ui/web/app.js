@@ -465,7 +465,7 @@ const screens = {
     const net = p.actions.filter(a => a.op === "importWifi" || a.op === "addPrinter");
     const sets = p.actions.filter(a => a.op === "settings");
     const autologin = p.actions.filter(a => a.op === "autoLoginOff");
-    const sysdata = p.actions.filter(a => a.op === "systemData");
+    const sysdata = p.actions.filter(a => a.op === "systemData" || a.op === "attachDisk");
     const repos = p.actions.filter(a => a.op === "addRepo");
     const skipped = apps.filter(a => a.op === "skip");
     const visibleApps = apps.filter(a => a.op !== "skip");
@@ -767,7 +767,8 @@ function updateSummary(s) {
   for (const a of p.actions) {
     if (!ui.selected[a.id]) continue;
     if (a.op === "copy" && loginOn[a.login] !== false) need += a.bytes;
-    if (a.op === "systemData") need += a.used || a.bytes || 0;
+    if (a.op === "systemData" && !(p.target.dataMounts || []).some(m => a.to === m.point || (a.to || "").startsWith(m.point + "/")))
+      need += a.used || a.bytes || 0;
     if (a.op === "install") apps++;
     if (a.op === "remove") { rm++; freed += a.bytes || 0; }
   }

@@ -187,6 +187,7 @@ type Disk struct {
 // Network regroupe ce qui touche au réseau et aux périphériques.
 type Network struct {
 	Wifi     []string `json:"wifi,omitempty"`
+	VPN      []string `json:"vpn,omitempty"` // connexions VPN (dont WireGuard)
 	Printers []string `json:"printers,omitempty"`
 }
 

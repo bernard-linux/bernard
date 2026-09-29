@@ -97,6 +97,8 @@ type Result struct {
 	Replaced    []string `json:"replaced,omitempty"`
 	JournalPath string   `json:"journalPath"`
 	ReportPath  string   `json:"reportPath"`
+	// Bilan : pages lisibles déposées dans le dossier Documents des comptes.
+	Bilan []string `json:"bilan,omitempty"`
 }
 
 // OK indique une migration sans aucun élément manqué.
@@ -230,6 +232,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 	if err != nil {
 		return res, err
 	}
+	res.Bilan = WriteBilan(res, s, j)
 	j.Append(journal.Record{T: journal.RecFinish})
 	res.ReportPath = filepath.Join(filepath.Dir(s.JournalPath), "rapport.json")
 	if b, err := json.MarshalIndent(res, "", "  "); err == nil {

@@ -43,8 +43,8 @@ func TestGnomeToGnomeKeepsOnlyWhitelist(t *testing.T) {
 	if out["org/gnome/desktop/input-sources"]["sources"] == "" {
 		t.Error("clavier perdu")
 	}
-	if _, ok := out["org/gnome/shell/extensions/dash-to-dock"]; ok {
-		t.Error("les réglages d'extensions ne doivent pas être repris (dock de Zorin)")
+	if out["org/gnome/shell/extensions/dash-to-dock"]["dock-position"] == "" {
+		t.Error("les réglages d'extensions (dock) doivent être repris")
 	}
 	if _, ok := out["org/gnome/evolution-data-server"]; ok {
 		t.Error("réglage interne repris à tort")
@@ -113,8 +113,8 @@ func TestSanitizeWifi(t *testing.T) {
 	if !strings.Contains(out, "psk=secret-du-wifi") {
 		t.Error("le mot de passe du réseau doit être repris")
 	}
-	if _, _, _, err := SanitizeWifi(strings.Replace(wifiFile, "type=wifi", "type=vpn", 1), nil); !errors.Is(err, ErrSkipped) {
-		t.Error("une connexion non Wi-Fi doit être écartée")
+	if _, _, _, err := SanitizeWifi(strings.Replace(wifiFile, "type=wifi", "type=ethernet", 1), nil); !errors.Is(err, ErrSkipped) {
+		t.Error("une connexion filaire doit être écartée")
 	}
 }
 

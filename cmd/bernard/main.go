@@ -471,7 +471,7 @@ func runPlan(ctx context.Context, args []string) int {
 	labels := map[string]string{
 		plan.OpCreateUser: "comptes à créer", plan.OpUseUser: "comptes existants réutilisés",
 		plan.OpSetupFlatpak: "installation de Flatpak", plan.OpInstall: "applications à installer",
-		plan.OpCopy: "dossiers à copier", plan.OpImportWifi: "réseaux Wi-Fi à importer",
+		plan.OpCopy: "dossiers à copier", plan.OpImportWifi: "réseaux Wi-Fi à importer", plan.OpImportVPN: "connexions VPN à importer",
 		plan.OpSkip: "éléments déjà présents ou inutiles", plan.OpReview: "actions manuelles proposées",
 		plan.OpSettings: "réglages de comptes", plan.OpAddPrinter: "imprimantes",
 		plan.OpRemove:   "applications absentes de l'ancien ordinateur (retrait proposé)",

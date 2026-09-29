@@ -372,8 +372,11 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 				note("Tâches planifiées de "+act.Login, err)
 			}
 
-		case plan.OpImportWifi:
+		case plan.OpImportWifi, plan.OpImportVPN:
 			label := "Wi-Fi « " + act.Label + " »"
+			if act.Op == plan.OpImportVPN {
+				label = "VPN « " + act.Label + " »"
+			}
 			var conn *settings.NMConnection
 			for i, w := range ex.Wifi {
 				if _, id, _, err := settings.SanitizeWifi(w.Content, nil); err == nil && id == act.Label {
@@ -386,6 +389,13 @@ func (a *Applier) Settings(ctx context.Context, p *plan.Plan, inv *inventory.Inv
 			}
 			if a.didLabel(journal.SysWifiAdded, act.Label) {
 				continue
+			}
+			if pkg := settings.VPNPlugin(conn.Content); pkg != "" && a.Sys != nil {
+				// Greffon VPN absent de la cible : installé depuis le dépôt de
+				// la distribution (sinon la connexion resterait inutilisable).
+				if _, failed := a.Sys.AptInstall(ctx, []string{pkg}); failed[pkg] != nil {
+					note(label+" : module "+pkg, failed[pkg])
+				}
 			}
 			path, err := sa.InstallWifi(ctx, *conn, userExists)
 			if err == nil {

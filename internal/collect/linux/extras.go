@@ -28,7 +28,7 @@ func CollectExtras(ctx context.Context, root, desktop string, users []inventory.
 			continue
 		}
 		s := string(b)
-		if strings.Contains(s, "type=wifi") || strings.Contains(s, "type=802-11-wireless") {
+		if _, _, _, err := settings.SanitizeWifi(s, nil); err == nil {
 			ex.Wifi = append(ex.Wifi, settings.NMConnection{File: filepath.Base(f), Content: s})
 		}
 	}

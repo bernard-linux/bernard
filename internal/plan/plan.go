@@ -29,6 +29,7 @@ const (
 	OpInstall      = "install"      // installer une application
 	OpCopy         = "copy"         // copier un jeu de données
 	OpImportWifi   = "importWifi"   // importer une connexion Wi-Fi
+	OpImportVPN    = "importVPN"    // importer une connexion VPN
 	OpSettings     = "settings"     // réglages du bureau et tâches planifiées d'un compte
 	OpAddPrinter   = "addPrinter"   // réinstaller une imprimante réseau
 	OpRemove       = "remove"       // retirer une application absente de l'ancien ordinateur
@@ -316,6 +317,9 @@ func Build(inv *inventory.Inventory, t Target) (*Plan, error) {
 	// 5. Réseau et imprimantes.
 	for _, w := range inv.Network.Wifi {
 		add(Action{Op: OpImportWifi, Label: w, Fidelity: FidelityFull, Selected: true})
+	}
+	for _, v := range inv.Network.VPN {
+		add(Action{Op: OpImportVPN, Label: v, Fidelity: FidelityFull, Selected: true})
 	}
 	for _, pr := range inv.Network.Printers {
 		add(Action{Op: OpAddPrinter, Label: pr, Fidelity: FidelityFull, Selected: true})

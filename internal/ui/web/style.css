@@ -214,3 +214,14 @@ dialog h2 { margin-top: 0; }
 details.advanced { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; }
 details.advanced > summary { cursor: pointer; font-weight: 600; color: var(--deep); }
 details.advanced h3 { font-size: 1rem; margin: 20px 0 6px; }
+
+/* Impression du bilan (ou enregistrement en PDF) : la page seule, en clair. */
+@media print {
+  :root { --deep: #12343B; --deep-2: #3F5F66; --foam: #fff; --paper: #fff; --line: #C9D8D3; color-scheme: light; }
+  .rail, .bar, #undo, button, .account-rm { display: none !important; }
+  .frame { display: block; min-height: 0; }
+  main { padding: 0 !important; }
+  details > pre, details > * { display: block; }
+  h1, h2 { break-after: avoid; }
+  li { break-inside: avoid; }
+}

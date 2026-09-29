@@ -54,6 +54,19 @@ ssid=E2E-Maison
 key-mgmt=wpa-psk
 psk=secret-e2e
 NM
+# 0.7 : connexion VPN WireGuard et fichier à deux noms (lien dur).
+cat > $SRC/etc/NetworkManager/system-connections/wg.nmconnection <<'NM'
+[connection]
+id=E2E-VPN
+uuid=0b5b7a3e-9f2a-4a38-9d6e-2f3c1a7b8e98
+type=wireguard
+interface-name=wge2e
+
+[wireguard]
+private-key=cle-privee-e2e
+NM
+mkdir -p $SRC/home/e2ealice/Sauvegarde
+ln $SRC/home/e2ealice/Images/album.tar $SRC/home/e2ealice/Sauvegarde/album.tar
 # Données hors des dossiers personnels (0.5) : logiciel dans /opt (avec un
 # fichier creux), site web appartenant à www-data, réglage ajouté dans /etc,
 # réglage qui remplace celui de la cible, dossier ajouté à la racine.
@@ -106,6 +119,9 @@ check "lien symbolique recréé"                    test "$(readlink /home/e2eal
 check "cache exclu"                               test ! -e /home/e2ealice/.cache/x
 check "tâches planifiées reprises"                bash -c "crontab -u e2ealice -l | grep -q sauvegarde"
 check "Wi-Fi repris en 600, sans nom d'interface" bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-Maison*); test \$(stat -c %a \$f) = 600 && ! grep -q interface-name \$f && grep -q psk=secret-e2e \$f"
+check "VPN WireGuard repris avec son interface"  bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-VPN*); grep -q interface-name=wge2e \$f && grep -q cle-privee-e2e \$f"
+check "lien dur recréé (même fichier)"           test "$(stat -c %i /home/e2ealice/Images/album.tar)" = "$(stat -c %i /home/e2ealice/Sauvegarde/album.tar)"
+check "bilan lisible dans Documents"              bash -c "grep -q 'Bilan de la migration' '/home/e2ealice/Documents/Bilan de la migration (Bernard).html' && test \$(stat -c %U '/home/e2ealice/Documents/Bilan de la migration (Bernard).html') = e2ealice"
 check "/opt : logiciel copié, exécutable"        test -x /opt/e2eappli/bin/outil
 check "/opt : fichier creux resté creux"          bash -c "cmp $SRC/opt/e2eappli/disque.img /opt/e2eappli/disque.img && test \$(du -k /opt/e2eappli/disque.img | cut -f1) -lt 10240"
 check "site web copié, propriétaire www-data"     test "$(stat -c %u /var/www/html/e2esite/index.php)" = 33
@@ -122,6 +138,7 @@ JOURNAL=$(ls /var/lib/bernard/*/journal.jsonl | head -1)
 $BIN/bernard undo --journal "$JOURNAL" >> $LOG 2>&1
 check "comptes supprimés"                         bash -c "! getent passwd e2ealice && ! getent passwd e2ebob"
 check "fichiers copiés retirés"                   test ! -e /home/e2ealice/Images/album.tar
+check "bilan retiré"                              test ! -e "/home/e2ealice/Documents/Bilan de la migration (Bernard).html"
 check "Wi-Fi retiré"                              bash -c "! ls /etc/NetworkManager/system-connections/bernard-E2E* 2>/dev/null"
 check "/opt : logiciel retiré"                    test ! -e /opt/e2eappli/bin/outil
 check "/etc : réglage ajouté retiré"              test ! -e /etc/e2e-appli.conf

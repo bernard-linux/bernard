@@ -280,8 +280,8 @@ func Write(ctx context.Context, inv *inventory.Inventory, dir, passphrase string
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if e.Kind != source.KindFile {
-				list = append(list, entry{Entry: e})
+			if e.Kind != source.KindFile || e.Same != "" {
+				list = append(list, entry{Entry: e}) // lien dur : pas de contenu
 				return nil
 			}
 			index++

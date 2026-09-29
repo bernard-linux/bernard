@@ -388,3 +388,52 @@ func TestPrefetchSkipped(t *testing.T) {
 		t.Fatalf("protocole désaligné : %v", err)
 	}
 }
+
+func sameInode(t *testing.T, a, b string) bool {
+	t.Helper()
+	fa, err1 := os.Stat(a)
+	fb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
+}
+
+func TestHardLinksKept(t *testing.T) {
+	inv, home := sourceTree(t)
+	// Un petit et un gros fichier à plusieurs noms (sauvegarde à la
+	// Timeshift) : un seul envoi, liens durs recréés.
+	write(t, filepath.Join(home, "sauvegarde/1/petit.txt"), []byte("même contenu"))
+	os.MkdirAll(filepath.Join(home, "sauvegarde/2"), 0o755)
+	os.Link(filepath.Join(home, "sauvegarde/1/petit.txt"), filepath.Join(home, "sauvegarde/2/petit.txt"))
+	os.Link(filepath.Join(home, "Vidéos/gros.mkv"), filepath.Join(home, "sauvegarde/2/gros.mkv"))
+	dst := filepath.Join(t.TempDir(), "arnaud")
+	jpath := filepath.Join(t.TempDir(), "journal.jsonl")
+	cli := connect(t, inv, 0)
+	rep, err := runCopy(t, cli, jpath, dst)
+	cli.Close()
+	if err != nil || !rep.OK() {
+		t.Fatalf("%v %+v", err, rep.Errors)
+	}
+	sameTree(t, home, dst, ".cache")
+	if !sameInode(t, filepath.Join(dst, "sauvegarde/1/petit.txt"), filepath.Join(dst, "sauvegarde/2/petit.txt")) {
+		t.Error("petit fichier : lien dur non recréé")
+	}
+	if !sameInode(t, filepath.Join(dst, "Vidéos/gros.mkv"), filepath.Join(dst, "sauvegarde/2/gros.mkv")) {
+		t.Error("gros fichier : lien dur non recréé")
+	}
+	if rep.Links != 2 {
+		t.Errorf("liens : %d", rep.Links)
+	}
+	// Reprise : rien à refaire.
+	cli = connect(t, inv, 0)
+	rep, err = runCopy(t, cli, jpath, dst)
+	cli.Close()
+	if err != nil || rep.Files != 0 {
+		t.Errorf("reprise : %v, %d fichiers recopiés", err, rep.Files)
+	}
+	// Annulation : tous les noms retirés.
+	if _, err := Undo(jpath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "sauvegarde/2/gros.mkv")); err == nil {
+		t.Error("annulation : lien dur laissé")
+	}
+}

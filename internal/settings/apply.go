@@ -96,13 +96,55 @@ func (a *Applier) RestoreDconf(ctx context.Context, login, home, backup string) 
 
 // ---------------------------------------------------------------- Wi-Fi
 
+// Types de connexions NetworkManager reprises : Wi-Fi et VPN (dont
+// WireGuard). Les connexions filaires restent propres à chaque machine.
+func ConnType(typ string) string {
+	switch typ {
+	case "wifi", "802-11-wireless":
+		return "wifi"
+	case "vpn", "wireguard":
+		return "vpn"
+	}
+	return ""
+}
+
+// Greffons VPN de NetworkManager : type de service → paquet Debian/Ubuntu.
+var vpnPlugins = map[string]string{
+	"org.freedesktop.NetworkManager.openvpn":     "network-manager-openvpn-gnome",
+	"org.freedesktop.NetworkManager.openconnect": "network-manager-openconnect-gnome",
+	"org.freedesktop.NetworkManager.vpnc":        "network-manager-vpnc-gnome",
+	"org.freedesktop.NetworkManager.pptp":        "network-manager-pptp-gnome",
+	"org.freedesktop.NetworkManager.l2tp":        "network-manager-l2tp-gnome",
+	"org.freedesktop.NetworkManager.strongswan":  "network-manager-strongswan",
+	"org.freedesktop.NetworkManager.fortisslvpn": "network-manager-fortisslvpn-gnome",
+	"org.freedesktop.NetworkManager.sstp":        "network-manager-sstp-gnome",
+}
+
+// VPNPlugin renvoie le paquet du greffon qu'une connexion VPN demande
+// (vide pour WireGuard, géré par NetworkManager lui-même).
+func VPNPlugin(content string) string {
+	section := ""
+	for _, l := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[") {
+			section = t
+			continue
+		}
+		if v, ok := strings.CutPrefix(t, "service-type="); ok && section == "[vpn]" {
+			return vpnPlugins[v]
+		}
+	}
+	return ""
+}
+
 // SanitizeWifi vérifie qu'un fichier NetworkManager est bien une connexion
-// Wi-Fi et retire ce qui dépend de l'ancienne machine (nom d'interface,
-// restriction à un compte absent). Renvoie le contenu nettoyé, le nom et
-// l'UUID de la connexion.
+// Wi-Fi ou VPN et retire ce qui dépend de l'ancienne machine (nom de la
+// carte Wi-Fi, restriction à un compte absent). Renvoie le contenu nettoyé,
+// le nom et l'UUID de la connexion.
 func SanitizeWifi(content string, userExists func(string) bool) (string, string, string, error) {
 	var out []string
 	section, typ, id, uuid := "", "", "", ""
+	iface := -1
 	sc := bufio.NewScanner(strings.NewReader(content))
 	for sc.Scan() {
 		line := sc.Text()
@@ -122,7 +164,9 @@ func SanitizeWifi(content string, userExists func(string) bool) (string, string,
 			case "uuid":
 				uuid = v
 			case "interface-name":
-				continue // la carte Wi-Fi n'a pas le même nom ici
+				// Nom de la carte Wi-Fi : différent ici. Pour WireGuard, c'est
+				// le nom de l'interface créée : on le garde.
+				iface = len(out)
 			case "permissions":
 				if !permissionsOK(v, userExists) {
 					continue // réservée à un compte absent : ouverte à tous
@@ -131,11 +175,14 @@ func SanitizeWifi(content string, userExists func(string) bool) (string, string,
 		}
 		out = append(out, line)
 	}
-	if typ != "wifi" && typ != "802-11-wireless" {
-		return "", "", "", fmt.Errorf("%w : pas une connexion Wi-Fi", ErrSkipped)
+	if ConnType(typ) == "" {
+		return "", "", "", fmt.Errorf("%w : pas une connexion Wi-Fi ni VPN", ErrSkipped)
+	}
+	if iface >= 0 && ConnType(typ) == "wifi" {
+		out = append(out[:iface], out[iface+1:]...)
 	}
 	if id == "" || !regexp.MustCompile(`^[0-9a-fA-F-]{36}$`).MatchString(uuid) {
-		return "", "", "", errors.New("connexion Wi-Fi incomplète")
+		return "", "", "", errors.New("connexion réseau incomplète")
 	}
 	return strings.Join(out, "\n") + "\n", id, uuid, nil
 }

@@ -1,5 +1,36 @@
 # Historique des versions
 
+## 0.7.0 — 29 septembre 2026
+
+**Finitions.**
+
+- **Bilan lisible** : à la fin, une page claire est rangée dans le dossier
+  Documents de chaque compte migré (« Bilan de la migration (Bernard) ») :
+  ce qui est arrivé, les échecs, ce qui reste à faire à la main, et une
+  **liste de vérifications** adaptée à ce qui a été migré (navigateurs,
+  Wi-Fi, VPN, imprimantes, sites et serveurs, disques, jeux Steam). Elle
+  s'imprime ou s'enregistre en PDF ; le bouton « Imprimer le bilan » fait de
+  même depuis Bernard. « Annuler la migration » la retire.
+- **Connexions VPN** reprises comme les Wi-Fi : OpenVPN, OpenConnect (Cisco
+  AnyConnect), vpnc, PPTP, L2TP, strongSwan, Fortinet, SSTP, et **WireGuard**.
+  Le module VPN de NetworkManager est installé s'il manque. Un mot de passe
+  demandé à chaque connexion reste à saisir.
+- **Extensions GNOME et tableau de bord de Zorin** : extensions actives et
+  leurs réglages (position et apparence du tableau de bord, dock…),
+  favoris du dock, fenêtres (Mutter), notifications ; sous Cinnamon, applets
+  et panneaux. (Auparavant, les favoris du dock n'étaient repris que si le
+  dossier personnel venait avec sa base de réglages.)
+- **Liens durs conservés** : un fichier à plusieurs noms (sauvegardes
+  Timeshift ou rsnapshot, où la même photo figure dans chaque instantané)
+  n'est envoyé qu'une fois et recréé tel quel sur le nouveau PC, par le
+  réseau comme par disque externe. La place nécessaire est comptée une
+  seule fois.
+- **Date de dernière utilisation des applications** : lue sur l'ancien
+  ordinateur (dernier lancement du programme, données des Flatpak et Snap).
+  Les applications inutilisées depuis plus de 12 mois sont décochées, date à
+  l'appui. Date inconnue (disque monté sans dates d'accès) : l'application
+  reste cochée.
+
 ## 0.6.1 — 29 septembre 2026
 
 **Autres disques de l'ancien ordinateur** (disque de jeux, dossier personnel

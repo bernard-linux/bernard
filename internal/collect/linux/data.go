@@ -97,6 +97,7 @@ type measureStats struct {
 // périphériques) sont ignorés : ils ne se migrent pas.
 func measure(root string, patterns []string) (measureStats, error) {
 	var st measureStats
+	seen := linkSeen{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			st.Unreadable++
@@ -123,7 +124,9 @@ func measure(root string, patterns []string) (measureStats, error) {
 				return nil
 			}
 			st.Files++
-			st.Bytes += info.Size()
+			if !seen.again(info) {
+				st.Bytes += info.Size()
+			}
 		case d.Type()&fs.ModeSymlink != 0:
 			st.Files++
 		}

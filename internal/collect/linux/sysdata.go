@@ -153,11 +153,30 @@ var recognizers = []struct {
 	{"var/www", inventory.SysWeb, "Sites web (/var/www)", ""},
 }
 
+// linkSeen repère les fichiers à plusieurs noms (liens durs), comptés une
+// seule fois : Bernard ne les copie qu'une fois (sauvegardes Timeshift ou
+// rsnapshot, où la même photo figure dans chaque instantané).
+type linkSeen map[[2]uint64]bool
+
+func (s linkSeen) again(fi fs.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || st.Nlink < 2 {
+		return false
+	}
+	k := [2]uint64{uint64(st.Dev), uint64(st.Ino)}
+	if s[k] {
+		return true
+	}
+	s[k] = true
+	return false
+}
+
 // usage mesure un dossier : fichiers, taille apparente, place occupée.
 type usage struct{ files, bytes, used int64 }
 
 func measureTree(root string, skip func(rel string, d fs.DirEntry) bool) usage {
 	var u usage
+	seen := linkSeen{}
 	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
@@ -175,6 +194,9 @@ func measureTree(root string, skip func(rel string, d fs.DirEntry) bool) usage {
 		if d.Type().IsRegular() {
 			if fi, err := d.Info(); err == nil {
 				u.files++
+				if seen.again(fi) {
+					return nil // autre nom d'un fichier déjà compté (lien dur)
+				}
 				u.bytes += fi.Size()
 				if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 					u.used += st.Blocks * 512

@@ -25,9 +25,10 @@ type FileError struct {
 // TreeReport résume une copie d'arborescence. Il alimente le rapport final :
 // tout ce qui n'a pas été copié y figure explicitement.
 type TreeReport struct {
-	Files          int64        `json:"files"`          // fichiers et liens copiés et vérifiés
-	Bytes          int64        `json:"bytes"`          // octets vérifiés
-	AlreadyPresent int64        `json:"alreadyPresent"` // identiques déjà sur la cible
+	Files          int64        `json:"files"`           // fichiers et liens copiés et vérifiés
+	Bytes          int64        `json:"bytes"`           // octets vérifiés
+	AlreadyPresent int64        `json:"alreadyPresent"`  // identiques déjà sur la cible
+	Links          int64        `json:"links,omitempty"` // liens durs recréés (comptés dans Files)
 	Renamed        []FileResult `json:"renamed,omitempty"`
 	Skipped        []string     `json:"skipped,omitempty"` // fichiers spéciaux non migrables
 	Excluded       []string     `json:"excluded,omitempty"`

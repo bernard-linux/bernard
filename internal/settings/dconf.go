@@ -114,7 +114,12 @@ var gnomeKeep = []string{
 	"org/gnome/desktop/session",
 	"org/gnome/settings-daemon/plugins/power",
 	"org/gnome/settings-daemon/plugins/media-keys",
-	"org/gnome/shell/favorite-apps",
+	"org/gnome/shell/extensions", // réglages des extensions (dont le tableau de bord de Zorin)
+	"org/gnome/mutter",
+	"org/gnome/desktop/notifications",
+	"org/gnome/desktop/search-providers",
+	"org/gnome/desktop/datetime",
+	"org/gnome/system/location",
 	"org/gnome/nautilus/preferences",
 	"org/gnome/nautilus/list-view",
 	"org/gnome/nautilus/icon-view",
@@ -135,7 +140,6 @@ var cinnamonKeep = []string{
 	"org/cinnamon/desktop/a11y",
 	"org/cinnamon/desktop/session",
 	"org/cinnamon/settings-daemon/plugins/power",
-	"org/cinnamon/favorite-apps",
 	"org/gnome/libgnomekbd/keyboard",
 	"org/nemo/preferences",
 	"org/gnome/terminal/legacy",
@@ -158,6 +162,28 @@ var gnomeToCinnamon = map[string]string{
 var sharedInterfaceKeys = map[string]bool{
 	"text-scaling-factor": true, "cursor-size": true, "font-name": true,
 	"monospace-font-name": true, "gtk-theme": true, "icon-theme": true, "cursor-theme": true,
+}
+
+// Clés isolées reprises dans des chemins dont le reste est interne au bureau
+// (historique, versions vues…) : dock, extensions et applets actifs.
+var gnomeKeepKeys = map[string][]string{
+	"org/gnome/shell": {"favorite-apps", "enabled-extensions", "disabled-extensions", "disable-user-extensions"},
+}
+
+var cinnamonKeepKeys = map[string][]string{
+	"org/cinnamon": {"favorite-apps", "enabled-applets", "enabled-desklets", "enabled-extensions",
+		"panels-enabled", "panels-height", "panels-autohide", "panels-hide-delay", "panels-show-delay", "panel-zone-icon-sizes"},
+}
+
+// keepKeys copie les clés retenues de chaque chemin.
+func keepKeys(in, out Dump, keys map[string][]string) {
+	for p, ks := range keys {
+		for _, k := range ks {
+			if v, ok := in[p][k]; ok {
+				out.set(p, k, v)
+			}
+		}
+	}
 }
 
 func keep(path string, prefixes []string) bool {
@@ -267,12 +293,14 @@ func translate(in Dump, src, dst string, themeExists func(kind, name string) boo
 				out[p] = copyMap(kv)
 			}
 		}
+		keepKeys(in, out, gnomeKeepKeys)
 	case src == dst && src == "cinnamon":
 		for p, kv := range in {
 			if keep(p, cinnamonKeep) {
 				out[p] = copyMap(kv)
 			}
 		}
+		keepKeys(in, out, cinnamonKeepKeys)
 	case src == "gnome" && dst == "cinnamon":
 		for p, kv := range in {
 			for from, to := range gnomeToCinnamon {

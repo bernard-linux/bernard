@@ -79,6 +79,11 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	for i := range inv.Apps {
 		inv.Apps[i].ID = "a" + strconv.Itoa(i+1)
 	}
+	lastMounts := ""
+	if opt.Root == "/" {
+		lastMounts = "/proc/self/mounts"
+	}
+	fillLastUsed(opt.Root, lastMounts, inv.Apps, inv.Users)
 	if !opt.SkipData {
 		mountsFile := ""
 		if opt.Root == "/" {
@@ -92,7 +97,9 @@ func Collect(ctx context.Context, opt Options) (*inventory.Inventory, error) {
 	inv.Packages = allPackages(opt.Root)
 	inv.PackagesRemoved = removedPackages(opt.Root, inv.Packages)
 
-	if wifi := wifiFromFiles(opt.Root); len(wifi) > 0 || offline {
+	wifi, vpn := wifiFromFiles(opt.Root)
+	inv.Network.VPN = vpn
+	if len(wifi) > 0 || offline {
 		inv.Network.Wifi = wifi
 	} else if wifi, err := wifiNetworks(ctx, opt.Runner); err == nil {
 		inv.Network.Wifi = wifi

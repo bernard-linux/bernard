@@ -56,6 +56,15 @@ type Entry struct {
 	// Xattrs : attributs étendus (ACL, capacités, attributs overlay de
 	// Docker…), valeurs en base64. Absents pour les liens symboliques.
 	Xattrs map[string]string `json:"xattrs,omitempty"`
+	// Same : pour un fichier à plusieurs noms (lien dur), chemin relatif du
+	// premier nom envoyé dans ce jeu de données. La cible recrée le lien au
+	// lieu de recopier le contenu (sauvegardes Timeshift/rsnapshot, images
+	// de conteneurs…).
+	Same string `json:"same,omitempty"`
+	// Nlink : nombre de noms du fichier, noté seulement s'il en a plusieurs.
+	Nlink uint64 `json:"nlink,omitempty"`
+
+	dev, ino uint64 // identité du fichier sur la source (non transmise)
 }
 
 // FileStream est le contenu d'un fichier à partir d'un décalage. Après avoir
@@ -131,6 +140,10 @@ func Walk(root string, excludes []string, fn func(Entry) error, onErr func(rel s
 		e := Entry{Rel: rel, Mode: info.Mode(), MTime: info.ModTime()}
 		if st, ok := info.Sys().(*syscall.Stat_t); ok {
 			e.User, e.Group = ownerNames(st.Uid, st.Gid)
+			e.dev, e.ino = uint64(st.Dev), uint64(st.Ino)
+			if st.Nlink > 1 && !d.IsDir() {
+				e.Nlink = uint64(st.Nlink)
+			}
 		}
 		switch {
 		case d.IsDir():
@@ -257,9 +270,19 @@ func (in *Includer) File(rel string) bool { return in == nil || in.files[rel] }
 // d'inclusion éventuelle.
 func WalkDataSet(root string, excludes, include []string, fn func(Entry) error, onErr func(rel string, err error)) error {
 	in := NewIncluder(include)
+	type fileID struct{ dev, ino uint64 }
+	first := map[fileID]string{}
 	return Walk(root, excludes, func(e Entry) error {
 		if e.Kind == KindDir && !in.Dir(e.Rel) || e.Kind != KindDir && !in.File(e.Rel) {
 			return nil
+		}
+		if e.Kind == KindFile && e.Nlink > 1 {
+			id := fileID{e.dev, e.ino}
+			if rel, ok := first[id]; ok {
+				e.Same = rel
+			} else {
+				first[id] = e.Rel
+			}
 		}
 		return fn(e)
 	}, onErr)

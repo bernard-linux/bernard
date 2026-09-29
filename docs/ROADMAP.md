@@ -13,8 +13,8 @@
 | 7 | Réglages : fichiers de configuration du dossier personnel (dont clés SSH/GPG), modèles du dossier neuf remplacés, préférences du bureau avec traduction GNOME ↔ Cinnamon et sauvegarde pour l'annulation, Wi-Fi avec mot de passe, tâches planifiées, imprimantes réseau sans pilote | Fait |
 | 8 | Paquets `.deb`, test de bout en bout réel, matrice d'intégration continue (Ubuntu 22.04/24.04, Debian 12, Mint 21/22), test Flathub réel, banc d'essai en machines virtuelles | Fait, sauf instantanés btrfs/LVM de la source (reportés) |
 
-| 9 | Données hors des dossiers personnels : détection (0.4), copie (0.5), serveurs et bases cohérents (0.6) — voir `DONNEES-HORS-DOSSIERS.md` | 0.4 fait |
-| 10 | Finitions : extensions GNOME et tableau de bord de Zorin, mode « fidèle », bilan lisible et PDF, date de dernière utilisation, VPN, anglais (0.7) | À faire |
+| 9 | Données hors des dossiers personnels : détection (0.4), copie (0.5), serveurs et bases cohérents (0.6) — voir `DONNEES-HORS-DOSSIERS.md` | Fait (0.4 à 0.6.1) |
+| 10 | Finitions : extensions GNOME et tableau de bord de Zorin, bilan lisible et PDF, date de dernière utilisation, VPN, liens durs (0.7) ; anglais | 0.7 fait, anglais à faire |
 | 11 | Validation V1.0 : banc de 16 combinaisons en machines virtuelles, 5 testeurs, dépôt APT du projet | À faire |
 
 ### Points déjà identifiés
@@ -22,8 +22,9 @@
 - `apt-mark showmanual` remonte de nombreux paquets du système de base. Le plan
   les classe « déjà présents », mais l'interface devra masquer ces lignes par
   défaut pour ne montrer que les vraies applications.
-- La date de dernière utilisation des applications n'est pas encore collectée
-  (seuil par défaut : 12 mois, date inconnue = application cochée).
+- Date de dernière utilisation (0.7) : date d'accès au programme, fiable
+  seulement si le disque source enregistre ces dates (« relatime », par
+  défaut) ; seuil 12 mois, date inconnue = application cochée.
 - La table Snap → Flatpak est provisoire (`internal/plan/snapmap.go`).
 - Étape 3, limites connues à lever :
   - la phrase de passe du paquet s'affiche pendant la saisie en ligne de

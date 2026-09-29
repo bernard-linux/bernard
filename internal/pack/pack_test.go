@@ -37,6 +37,8 @@ func buildPack(t *testing.T) (string, string, *inventory.Inventory) {
 	write(t, filepath.Join(home, "vide.txt"), nil)
 	write(t, filepath.Join(home, ".cache/x"), random(10))
 	os.Symlink("Documents", filepath.Join(home, "docs"))
+	os.MkdirAll(filepath.Join(home, "copie"), 0o755)
+	os.Link(filepath.Join(home, "exact.bin"), filepath.Join(home, "copie/exact.bin")) // lien dur : contenu écrit une fois
 	inv := &inventory.Inventory{
 		Schema:   inventory.Schema,
 		Source:   inventory.Source{OS: "linux", Hostname: "ancien-pc"},
@@ -93,6 +95,11 @@ func TestPackRoundTrip(t *testing.T) {
 		if sa.Mode() != sb.Mode() || !sa.ModTime().Equal(sb.ModTime()) {
 			t.Errorf("%s : droits ou date perdus", rel)
 		}
+	}
+	fa, _ := os.Stat(filepath.Join(dst, "exact.bin"))
+	fb, _ := os.Stat(filepath.Join(dst, "copie/exact.bin"))
+	if fa == nil || fb == nil || !os.SameFile(fa, fb) {
+		t.Error("lien dur non recréé depuis le paquet")
 	}
 	if l, _ := os.Readlink(filepath.Join(dst, "docs")); l != "Documents" {
 		t.Error("lien perdu")

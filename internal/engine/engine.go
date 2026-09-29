@@ -92,6 +92,9 @@ type Receiver struct {
 	ahead      map[int]int64 // index → octets
 	aheadBytes int64
 	aheadReq   int
+	// linked : premiers noms des fichiers à plusieurs noms, rangés dans le
+	// jeu de données en cours (clé → résultat), pour recréer les liens durs.
+	linked map[string]transfer.FileResult
 }
 
 // pending est un petit fichier reçu, en attente de validation par lot.
@@ -171,6 +174,7 @@ func (r *Receiver) CopyDataSetAs(ctx context.Context, ds inventory.DataSet, dstR
 		return nil
 	}
 	r.batch, r.batchSize = nil, 0
+	r.linked = map[string]transfer.FileResult{}
 	r.aheadNext, r.ahead, r.aheadBytes, r.aheadReq = 0, map[int]int64{}, 0, 0
 	pf, _ := r.Src.(Prefetcher)
 
@@ -221,7 +225,7 @@ func (r *Receiver) isDone(key string, e source.Entry) bool {
 // small indique qu'un fichier passe par les lots : petit, et pas de reprise
 // en cours à un décalage (sinon, chemin classique).
 func (r *Receiver) small(key string, e source.Entry) bool {
-	if e.Kind != source.KindFile || e.Size >= SmallFile {
+	if e.Kind != source.KindFile || e.Size >= SmallFile || e.Same != "" {
 		return false
 	}
 	p, ok := r.State.Progress[key]
@@ -241,6 +245,10 @@ func (r *Receiver) prefetch(pf Prefetcher, ds inventory.DataSet, entries []sourc
 	for r.aheadNext < len(entries) && len(r.ahead) < aheadFiles && r.aheadBytes < aheadBytes && r.aheadReq < aheadReqBytes {
 		e := entries[r.aheadNext]
 		key := ds.ID + "/" + e.Rel
+		if e.Kind == source.KindFile && e.Same != "" {
+			r.aheadNext++ // lien dur : rien à demander
+			continue
+		}
 		if e.Kind == source.KindFile && !r.small(key, e) && !r.isDone(key, e) {
 			break // gros fichier : pas de demande au-delà
 		}
@@ -329,6 +337,17 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 			}
 			tally(rep, res)
 		case source.KindFile:
+			if e.Same != "" {
+				ok, err := r.hardLink(ctx, ds.ID, e, key, dst, dstRoot, owner, rep, fail, total)
+				if err != nil {
+					return err
+				}
+				if ok {
+					r.progress(ds.ID, e.Rel, i, total)
+					return nil
+				}
+				// Premier nom absent de la cible : contenu copié normalement.
+			}
 			if err := r.makeRoom(dst); err != nil {
 				return fail(e.Rel, err)
 			}
@@ -370,6 +389,73 @@ func (r *Receiver) handle(ctx context.Context, ds inventory.DataSet, e source.En
 	return nil
 }
 
+// noteLinked retient où a été rangé le premier nom d'un fichier à
+// plusieurs noms.
+func (r *Receiver) noteLinked(key string, e source.Entry, res transfer.FileResult) {
+	if e.Nlink > 1 && e.Same == "" && r.linked != nil {
+		r.linked[key] = res
+	}
+}
+
+// placedAs renvoie où et avec quelle empreinte un élément de ce jeu de
+// données a été rangé (cette session ou une précédente).
+func (r *Receiver) placedAs(key string) (transfer.FileResult, bool) {
+	if res, ok := r.linked[key]; ok {
+		return res, true
+	}
+	if d, ok := r.State.Done[key]; ok && d.Hash != "" {
+		return transfer.FileResult{Dst: d.Dst, Hash: d.Hash}, true
+	}
+	return transfer.FileResult{}, false
+}
+
+// hardLink recrée un lien dur vers le premier nom du fichier. Renvoie faux
+// si ce premier nom n'a pas été rangé (erreur, exclusion) : le fichier est
+// alors copié comme les autres.
+func (r *Receiver) hardLink(ctx context.Context, dsID string, e source.Entry, key, dst, dstRoot string, owner *transfer.Owner, rep *transfer.TreeReport, fail func(string, error) error, total int) (bool, error) {
+	firstKey := dsID + "/" + e.Same
+	first, ok := r.placedAs(firstKey)
+	if !ok && len(r.batch) > 0 {
+		// Premier nom peut-être dans le lot en cours : on le range d'abord.
+		if err := r.flush(ctx, dsID, dstRoot, owner, rep, fail, total); err != nil {
+			return false, err
+		}
+		first, ok = r.placedAs(firstKey)
+	}
+	if !ok {
+		return false, nil
+	}
+	fi1, err := os.Lstat(first.Dst)
+	if err != nil || !fi1.Mode().IsRegular() {
+		return false, nil
+	}
+	res := transfer.FileResult{Src: e.Rel, Dst: dst, Hash: first.Hash, Bytes: e.Size, Status: transfer.StatusCopied}
+	if fi2, err := os.Lstat(dst); err == nil {
+		if os.SameFile(fi1, fi2) {
+			res.Status = transfer.StatusAlreadyPresent
+		} else if err := r.makeRoom(dst); err != nil {
+			return true, fail(e.Rel, err)
+		} else if _, err := os.Lstat(dst); err == nil {
+			return false, nil // un autre fichier porte ce nom : copie classique (renommée)
+		}
+	}
+	if res.Status == transfer.StatusCopied {
+		if err := os.Link(first.Dst, dst); err != nil {
+			return false, nil // autre disque, système de fichiers sans liens durs…
+		}
+	}
+	if err := r.doneLater(key, res, e); err != nil {
+		return true, err
+	}
+	if res.Status == transfer.StatusAlreadyPresent {
+		rep.AlreadyPresent++
+	} else {
+		rep.Files++
+		rep.Links++
+	}
+	return true, nil
+}
+
 // receiveSmall reçoit un petit fichier dans son fichier temporaire, sans
 // attendre le disque ; il sera vérifié et rangé avec son lot.
 func (r *Receiver) receiveSmall(ctx context.Context, ds string, e source.Entry, dst, key string) error {
@@ -407,7 +493,7 @@ func (r *Receiver) receiveSmall(ctx context.Context, ds string, e source.Entry, 
 		return err
 	}
 	info := st.Info()
-	info.Rel, info.User, info.Group, info.Xattrs = e.Rel, e.User, e.Group, e.Xattrs
+	info.Rel, info.User, info.Group, info.Xattrs, info.Nlink = e.Rel, e.User, e.Group, e.Xattrs, e.Nlink
 	if len(r.batch) == 0 {
 		r.batchSince = time.Now()
 	}
@@ -473,6 +559,7 @@ func (r *Receiver) flush(ctx context.Context, dsID, dstRoot string, owner *trans
 		if err := r.doneLater(ok[i].key, res, ok[i].e); err != nil {
 			return err
 		}
+		r.noteLinked(ok[i].key, ok[i].e, res)
 		tally(rep, res)
 	}
 	if err := r.Journal.Sync(); err != nil {
@@ -548,6 +635,7 @@ func (r *Receiver) receiveFile(ctx context.Context, ds string, e source.Entry, d
 			err = owner.Apply(res.Dst)
 		}
 		if err == nil {
+			r.noteLinked(key, e, res)
 			return res, r.done(key, res, e)
 		}
 		if errors.Is(err, transfer.ErrVerifyFailed) && attempt == 0 {

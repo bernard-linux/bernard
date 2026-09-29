@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bernard-linux/bernard/internal/inventory"
 )
@@ -334,5 +335,41 @@ func TestClassifyDisk(t *testing.T) {
 	os.MkdirAll(filepath.Join(d, "SteamLibrary"), 0o755)
 	if k, _ := classifyDisk(d); k != inventory.SysSteam {
 		t.Errorf("Steam : %s", k)
+	}
+}
+
+func TestLastUsed(t *testing.T) {
+	root := t.TempDir()
+	w := func(rel, c string) string {
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(c), 0o755)
+		return p
+	}
+	w("var/lib/dpkg/info/gimp.list", "/usr/bin/gimp-2.10\n/usr/share/applications/gimp.desktop\n")
+	w("usr/share/applications/gimp.desktop", "[Desktop Entry]\nName=GIMP\nExec=env LANG=fr gimp-2.10 %U\n")
+	bin := w("usr/bin/gimp-2.10", "binaire")
+	mtime := time.Now().Add(-400 * 24 * time.Hour)
+	used := time.Now().Add(-30 * 24 * time.Hour)
+	os.Chtimes(bin, used, mtime)
+	w("var/lib/dpkg/info/vieux.list", "/usr/bin/vieux\n/usr/share/applications/vieux.desktop\n")
+	w("usr/share/applications/vieux.desktop", "[Desktop Entry]\nExec=/usr/bin/vieux\n")
+	old := w("usr/bin/vieux", "x")
+	os.Chtimes(old, mtime, mtime) // jamais lu depuis l'installation : date inconnue
+	mounts := w("mounts", "/dev/sda2 / ext4 rw,relatime 0 0\n")
+
+	apps := []inventory.App{{Name: "gimp", Origin: inventory.OriginApt}, {Name: "vieux", Origin: inventory.OriginApt}}
+	fillLastUsed(root, mounts, apps, nil)
+	if apps[0].LastUsed == nil || apps[0].LastUsed.Sub(used).Abs() > time.Second {
+		t.Errorf("gimp : %v", apps[0].LastUsed)
+	}
+	if apps[1].LastUsed != nil {
+		t.Errorf("vieux : date inconnue attendue, %v", apps[1].LastUsed)
+	}
+	apps[0].LastUsed = nil
+	noatime := w("mounts2", "/dev/sda2 / ext4 rw,noatime 0 0\n")
+	fillLastUsed(root, noatime, apps, nil)
+	if apps[0].LastUsed != nil {
+		t.Error("noatime : aucune date fiable")
 	}
 }

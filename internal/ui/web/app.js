@@ -462,7 +462,7 @@ const screens = {
     const copies = p.actions.filter(a => a.op === "copy");
     const apps = p.actions.filter(a => ["install", "review", "skip"].includes(a.op) && a.from && a.from.startsWith("a"))
       .sort((a, b) => lastUsed(s, b) - lastUsed(s, a));
-    const net = p.actions.filter(a => a.op === "importWifi" || a.op === "addPrinter");
+    const net = p.actions.filter(a => a.op === "importWifi" || a.op === "importVPN" || a.op === "addPrinter");
     const sets = p.actions.filter(a => a.op === "settings");
     const autologin = p.actions.filter(a => a.op === "autoLoginOff");
     const sysdata = p.actions.filter(a => a.op === "systemData" || a.op === "attachDisk");
@@ -508,6 +508,8 @@ const screens = {
 
       ${net.length ? `<h2>Réseau et imprimantes</h2><ul class="list">${net.map(a => a.op === "importWifi"
         ? row(a, `Wi-Fi « ${esc(a.label)} »`, "Le mot de passe du réseau est repris.")
+        : a.op === "importVPN"
+        ? row(a, `VPN « ${esc(a.label)} »`, "Réglages repris, module VPN installé au besoin. Un mot de passe demandé à chaque connexion restera à saisir.")
         : row(a, `Imprimante ${esc(a.label)}`, "Réinstallée automatiquement si c'est une imprimante réseau ; une imprimante USB sera à rebrancher.")).join("")}</ul>` : ""}
 
       ${advancedSection(s, removals, keyboards)}
@@ -616,14 +618,18 @@ const screens = {
       ${renamed.length ? `<h2>Fichiers renommés</h2><p>Un fichier du même nom existait déjà ici ; il a été conservé et la copie a reçu un nouveau nom.</p>
         <ul class="list">${renamed.map(f => `<li><span></span><span class="meta">${esc(f.dst)}</span><span></span></li>`).join("")}</ul>` : ""}
       ${skippedFiles.length ? `<details><summary>${skippedFiles.length} fichiers spéciaux ignorés (tubes, sockets)</summary><pre class="log">${esc(skippedFiles.join("\n"))}</pre></details>` : ""}
+      ${(r.bilan || []).length ? `<p>Ce bilan est aussi rangé dans vos documents : <span class="cmd">${r.bilan.map(esc).join("</span>, <span class=\"cmd\">")}</span>.
+        Il contient une liste de vérifications à faire tranquillement.</p>` : ""}
       <p class="meta">Rapport détaillé : <span class="cmd">${esc(r.reportPath || "")}</span></p>
       ${s.undo ? "" : extraAccountsSection(s)}
       <div id="undo"></div>
       <div class="bar"><span class="summary">Gardez l'ancien ordinateur intact pour l'instant.</span>
         <button data-act="undo" class="danger">Annuler la migration</button>
+        <button data-act="print" class="quiet">Imprimer le bilan</button>
         <button data-act="quit" class="quiet">Fermer</button>
         ${s.undo ? "" : `<button data-act="reboot" class="primary">Redémarrer maintenant</button>`}</div>`));
     main.querySelector("[data-act=quit]").addEventListener("click", () => { api("quit"); window.close(); });
+    main.querySelector("[data-act=print]").addEventListener("click", () => window.print());
     main.querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", async () => {
       const login = b.dataset.rm, on = b.dataset.on === "1";
       const acc = (s.extraAccounts || []).find(x => x.login === login) || {};

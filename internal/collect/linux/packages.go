@@ -9,6 +9,7 @@ import (
 
 	"github.com/bernard-linux/bernard/internal/aptrepo"
 	"github.com/bernard-linux/bernard/internal/inventory"
+	"github.com/bernard-linux/bernard/internal/settings"
 	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
@@ -141,12 +142,12 @@ func printers(ctx context.Context, run Runner) ([]string, error) {
 	return lines(out), nil
 }
 
-// wifiFromFiles lit les noms des connexions Wi-Fi directement dans les
-// fichiers de NetworkManager (droits administrateur requis). Contrairement à
-// nmcli, cela fonctionne aussi pour un système monté depuis un autre disque.
-func wifiFromFiles(root string) []string {
+// wifiFromFiles lit les noms des connexions Wi-Fi et VPN directement dans
+// les fichiers de NetworkManager (droits administrateur requis).
+// Contrairement à nmcli, cela fonctionne aussi pour un système monté depuis
+// un autre disque.
+func wifiFromFiles(root string) (names, vpn []string) {
 	files, _ := filepath.Glob(filepath.Join(root, "etc/NetworkManager/system-connections/*"))
-	var names []string
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -161,10 +162,18 @@ func wifiFromFiles(root string) []string {
 				typ = v
 			}
 		}
-		if id != "" && (typ == "wifi" || typ == "802-11-wireless") {
-			names = append(names, id)
+		switch settings.ConnType(typ) {
+		case "wifi":
+			if id != "" {
+				names = append(names, id)
+			}
+		case "vpn":
+			if id != "" {
+				vpn = append(vpn, id)
+			}
 		}
 	}
 	sort.Strings(names)
-	return names
+	sort.Strings(vpn)
+	return names, vpn
 }

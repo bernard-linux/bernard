@@ -34,13 +34,17 @@ jobs:
           - debian:12
           - linuxmintd/mint21.3-amd64
           - linuxmintd/mint22-amd64
-    container: ${{ matrix.image }}
+    container:
+      image: ${{ matrix.image }}
+      # Privilégié : fichiers spéciaux (fichiers effacés d'overlay de Docker)
+      # et attributs étendus « trusted », comme sur un vrai ordinateur.
+      options: --privileged
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
         with: { name: binaires, path: bin }
       - run: chmod +x bin/*
-      - run: apt-get update && apt-get install -y --no-install-recommends cron dbus dconf-cli passwd util-linux
+      - run: apt-get update && apt-get install -y --no-install-recommends cron dbus dconf-cli passwd util-linux python3
       - run: tests/e2e/run.sh bin
 
   # Tests système réels (création de compte, apt, dconf d'un compte non

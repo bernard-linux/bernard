@@ -14,14 +14,15 @@ BIN=${1:-bin}
 SRC=$(mktemp -d /tmp/bernard-e2e-src.XXXX)
 LOG=$(mktemp /tmp/bernard-e2e-log.XXXX)
 PORT=51599
-# Nom du bilan selon la langue du système (Bernard parle français ou anglais).
-case "${LANGUAGE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-fr}}}}" in
-  fr*|"") BILAN="Bilan de la migration (Bernard).html";;
-  *)      BILAN="Migration report (Bernard).html";;
-esac
 FAILS=0
 ok()   { echo "  ok    $*"; }
 bad()  { echo "  ÉCHEC $*"; FAILS=$((FAILS+1)); }
+skip() { echo "  sauté $*"; }
+# setx FICHIER NOM VALEUR / getx FICHIER NOM : attributs étendus (python3).
+setx() { command -v python3 >/dev/null && python3 -c "import os,sys; os.setxattr(sys.argv[1], sys.argv[2], sys.argv[3].encode())" "$@" 2>/dev/null; }
+getx() { python3 -c "import os,sys; print(os.getxattr(sys.argv[1], sys.argv[2]).decode())" "$@" 2>/dev/null; }
+# xattr_here DOSSIER NOM : ce système de fichiers accepte-t-il cet attribut ?
+xattr_here() { local f; f=$(mktemp -p "$1") && setx "$f" "$2" sonde; local r=$?; rm -f "$f"; return $r; }
 check(){ local what=$1; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else bad "$what"; fi; }
 
 [ "$(id -u)" -eq 0 ] || { echo "Lancez avec sudo."; exit 2; }
@@ -86,10 +87,14 @@ echo "plan" > $SRC/data/e2eprojets/plan.txt
 # Couche overlay façon Docker (0.6) : fichier « effacé » et dossier opaque
 # (attribut étendu), plus une ACL sur un fichier de /opt.
 mkdir -p $SRC/var/lib/docker/overlay2/c1/diff/opaque
-mknod $SRC/var/lib/docker/overlay2/c1/diff/efface c 0 0
-python3 -c "import os; os.setxattr('$SRC/var/lib/docker/overlay2/c1/diff/opaque', 'trusted.overlay.opaque', b'y')"
+# Certains environnements (conteneur non privilégié, python3 absent) ne
+# permettent pas de créer ces éléments : leurs vérifications sont alors
+# sautées, pas comptées en échec.
+HAS_WHITEOUT=0; HAS_OPAQUE=0; HAS_USERX=0
+mknod $SRC/var/lib/docker/overlay2/c1/diff/efface c 0 0 2>/dev/null && HAS_WHITEOUT=1
+setx $SRC/var/lib/docker/overlay2/c1/diff/opaque trusted.overlay.opaque y && HAS_OPAQUE=1
 echo "image" > $SRC/var/lib/docker/overlay2/c1/diff/fichier
-python3 -c "import os; os.setxattr('$SRC/opt/e2eappli/bin/outil', 'user.bernard', b'attribut')"
+setx $SRC/opt/e2eappli/bin/outil user.bernard attribut && HAS_USERX=1
 BEFORE=$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)
 
 echo "== Migration (nouveau mot de passe demandé pour e2ebob)"
@@ -126,6 +131,8 @@ check "tâches planifiées reprises"                bash -c "crontab -u e2ealice
 check "Wi-Fi repris en 600, sans nom d'interface" bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-Maison*); test \$(stat -c %a \$f) = 600 && ! grep -q interface-name \$f && grep -q psk=secret-e2e \$f"
 check "VPN WireGuard repris avec son interface"  bash -c "f=\$(ls /etc/NetworkManager/system-connections/bernard-E2E-VPN*); grep -q interface-name=wge2e \$f && grep -q cle-privee-e2e \$f"
 check "lien dur recréé (même fichier)"           test "$(stat -c %i /home/e2ealice/Images/album.tar)" = "$(stat -c %i /home/e2ealice/Sauvegarde/album.tar)"
+# Nom du bilan selon la langue de Bernard (français ou anglais).
+BILAN=$(cd /home/e2ealice/Documents 2>/dev/null && ls | grep -E '^(Bilan de la migration|Migration report) \(Bernard\)\.html$' | head -1)
 check "bilan lisible dans Documents"              bash -c "grep -q '<h1>' \"/home/e2ealice/Documents/$BILAN\" && test \$(stat -c %U \"/home/e2ealice/Documents/$BILAN\") = e2ealice"
 check "/opt : logiciel copié, exécutable"        test -x /opt/e2eappli/bin/outil
 check "/opt : fichier creux resté creux"          bash -c "cmp $SRC/opt/e2eappli/disque.img /opt/e2eappli/disque.img && test \$(du -k /opt/e2eappli/disque.img | cut -f1) -lt 10240"
@@ -133,9 +140,15 @@ check "site web copié, propriétaire www-data"     test "$(stat -c %u /var/www/
 check "/etc : réglage ajouté"                     grep -q reglage=e2e /etc/e2e-appli.conf
 check "/etc : réglage de l'ancien PC en place"    grep -q "ancien PC" /etc/e2e-remplace.conf
 check "dossier /data copié"                       test -f /data/e2eprojets/plan.txt
-check "Docker : fichier effacé d'overlay recréé"  test -c /var/lib/docker/overlay2/c1/diff/efface
-check "Docker : dossier opaque (attribut étendu)" python3 -c "import os,sys; sys.exit(os.getxattr('/var/lib/docker/overlay2/c1/diff/opaque','trusted.overlay.opaque')!=b'y')"
-check "attribut étendu d'un fichier de /opt"      python3 -c "import os,sys; sys.exit(os.getxattr('/opt/e2eappli/bin/outil','user.bernard')!=b'attribut')"
+if [ $HAS_WHITEOUT = 1 ]; then
+  check "Docker : fichier effacé d'overlay recréé"  test -c /var/lib/docker/overlay2/c1/diff/efface
+else skip "Docker : fichier effacé d'overlay (création impossible ici : conteneur non privilégié)"; fi
+if [ $HAS_OPAQUE = 1 ] && xattr_here /var/lib/docker/overlay2/c1/diff trusted.overlay.opaque; then
+  check "Docker : dossier opaque (attribut étendu)" test "$(getx /var/lib/docker/overlay2/c1/diff/opaque trusted.overlay.opaque)" = y
+else skip "Docker : dossier opaque (attributs « trusted » non pris en charge ici)"; fi
+if [ $HAS_USERX = 1 ] && xattr_here /opt/e2eappli/bin user.bernard; then
+  check "attribut étendu d'un fichier de /opt"      test "$(getx /opt/e2eappli/bin/outil user.bernard)" = attribut
+else skip "attribut étendu d'un fichier de /opt (python3 ou attributs absents ici)"; fi
 check "source strictement inchangée"             test "$(find $SRC -type f -exec sha256sum {} + | sort | sha256sum)" = "$BEFORE"
 
 echo "== Annulation"
@@ -143,7 +156,7 @@ JOURNAL=$(ls /var/lib/bernard/*/journal.jsonl | head -1)
 $BIN/bernard undo --journal "$JOURNAL" >> $LOG 2>&1
 check "comptes supprimés"                         bash -c "! getent passwd e2ealice && ! getent passwd e2ebob"
 check "fichiers copiés retirés"                   test ! -e /home/e2ealice/Images/album.tar
-check "bilan retiré"                              test ! -e "/home/e2ealice/Documents/$BILAN"
+check "bilan retiré"                              test -n "$BILAN" -a ! -e "/home/e2ealice/Documents/$BILAN"
 check "Wi-Fi retiré"                              bash -c "! ls /etc/NetworkManager/system-connections/bernard-E2E* 2>/dev/null"
 check "/opt : logiciel retiré"                    test ! -e /opt/e2eappli/bin/outil
 check "/etc : réglage ajouté retiré"              test ! -e /etc/e2e-appli.conf

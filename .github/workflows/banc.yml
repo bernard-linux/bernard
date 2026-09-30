@@ -1,0 +1,63 @@
+name: Banc VM
+
+# Banc d'essai en machines virtuelles : deux vrais systèmes (ancien et
+# nouveau PC) reliés par un réseau privé. Vérifie ce qu'un conteneur ne peut
+# pas : services arrêtés et relancés (MariaDB, Docker), disque déplacé
+# rattaché au démarrage, dépôt tiers, recherche automatique sur le réseau,
+# redémarrage, suppression du compte provisoire, annulation.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  banc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            src: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+            dst: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+          - name: ubuntu-22.04
+            src: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+            dst: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+          - name: debian-12
+            src: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+            dst: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+          - name: ubuntu-22.04-vers-24.04
+            src: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+            dst: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    name: banc (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.22" }
+      - run: make build
+      - name: KVM et outils
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils e2fsprogs openssh-client
+          ls -l /dev/kvm
+      - name: Images
+        run: |
+          mkdir -p images
+          curl -fsSL -o images/ancien.qcow2 "${{ matrix.src }}"
+          if [ "${{ matrix.src }}" = "${{ matrix.dst }}" ]; then cp images/ancien.qcow2 images/nouveau.qcow2
+          else curl -fsSL -o images/nouveau.qcow2 "${{ matrix.dst }}"; fi
+      - name: Banc
+        run: sudo BANC_DIR=$PWD/travail tests/vm/run.sh bin images/ancien.qcow2 images/nouveau.qcow2
+      - name: Journaux
+        if: always()
+        run: sudo chmod -R a+r travail || true
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: banc-${{ matrix.name }}
+          path: |
+            travail/*.log
+            travail/src-infos
+          if-no-files-found: ignore

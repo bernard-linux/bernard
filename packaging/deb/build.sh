@@ -28,6 +28,15 @@ install -Dm644 packaging/icons/bernard.svg $S/usr/share/icons/hicolor/scalable/a
 install -Dm644 LICENSE $S/usr/share/doc/bernard/copyright
 install -Dm644 README.md $S/usr/share/doc/bernard/README.md
 
+# Dépôt APT de Bernard (mises à jour), si la clé publique du dépôt est
+# présente dans les sources (packaging/apt/bernard-archive-keyring.gpg).
+CONFFILES=""
+if [ -s packaging/apt/bernard-archive-keyring.gpg ]; then
+  install -Dm644 packaging/apt/bernard-archive-keyring.gpg $S/usr/share/keyrings/bernard-archive-keyring.gpg
+  install -Dm644 packaging/apt/bernard.sources $S/etc/apt/sources.list.d/bernard.sources
+  CONFFILES="/etc/apt/sources.list.d/bernard.sources"
+fi
+
 DEPS="pkexec | policykit-1"
 if pkg-config --exists webkit2gtk-4.1 2>/dev/null && make window >/dev/null 2>&1; then
   install -Dm755 bin/bernard-window $S/usr/bin/bernard-window
@@ -60,5 +69,6 @@ Description: assistant de migration vers Linux
  l'ancien ordinateur n'est jamais modifié ; tout est annulable. Le même
  programme sert sur les deux ordinateurs, avec une interface graphique.
 CTL
+[ -n "$CONFFILES" ] && echo "$CONFFILES" > $S/DEBIAN/conffiles
 dpkg-deb --build --root-owner-group $S dist/bernard_${VERSION}_${ARCH}.deb >/dev/null
 echo "dist/bernard_${VERSION}_${ARCH}.deb"

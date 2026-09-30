@@ -61,6 +61,12 @@ const (
 	// SysFstab : disque rattaché. Name = identifiant, Dst = sauvegarde de
 	// /etc/fstab, Key = point de montage.
 	SysFstab = "fstab"
+	// SysServiceData : dossier de données d'un service (base, Docker…) de
+	// la cible mis de côté EN ENTIER avant d'y déposer celui de l'ancien
+	// ordinateur. Name = dossier, Dst = emplacement de la version mise de
+	// côté, Service = unités systemd. L'annulation remet le dossier entier :
+	// jamais de mélange de fichiers de deux bases.
+	SysServiceData = "serviceData"
 )
 
 // Record est une ligne du journal.
@@ -79,6 +85,7 @@ type Record struct {
 	Error     string    `json:"error,omitempty"`
 	Op        string    `json:"op,omitempty"`
 	Name      string    `json:"name,omitempty"`
+	Service   string    `json:"service,omitempty"`
 }
 
 // Journal est ouvert en ajout seul.

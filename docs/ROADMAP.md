@@ -15,7 +15,7 @@
 
 | 9 | Données hors des dossiers personnels : détection (0.4), copie (0.5), serveurs et bases cohérents (0.6) — voir `DONNEES-HORS-DOSSIERS.md` | Fait (0.4 à 0.6.1) |
 | 10 | Finitions : extensions GNOME et tableau de bord de Zorin, bilan lisible et PDF, date de dernière utilisation, VPN, liens durs (0.7) ; anglais | Fait (0.7 ; anglais en 0.8) |
-| 11 | Validation V1.0 : banc de 16 combinaisons en machines virtuelles, 5 testeurs, dépôt APT du projet | À faire |
+| 11 | Validation V1.0 : banc en machines virtuelles (automatique, 0.9), essais VirtualBox avec le vrai bureau, 5 testeurs, dépôt APT du projet (0.9) | En cours |
 
 ### Points déjà identifiés
 

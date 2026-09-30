@@ -3,7 +3,8 @@ package i18n
 // Réglages, système, services, inventaire et collecte.
 func init() {
 	add(map[string]string{
-		"non appliqué": "not applied",
+		"Docker et containerd : images": "Docker and containerd: images",
+		"non appliqué":                  "not applied",
 		// settings
 		"identifiant refusé : %q":                  "username refused: %q",
 		"lecture des réglages actuels de %s : %w":  "could not read the current settings of %s: %w",

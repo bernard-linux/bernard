@@ -250,6 +250,10 @@ func Undo(ctx context.Context, journalPath string) (*engine.UndoReport, *apply.U
 	// Les profils échangés reprennent d'abord leur place, pour que
 	// l'annulation des fichiers retrouve les copies sous leur nom d'origine.
 	prefErrs := apply.UndoPreferSource(st)
+	// Dossiers de services (bases, Docker) remis en entier avant tout le
+	// reste : l'annulation fichier par fichier ne les touche alors plus.
+	svcRestored, svcErrs := apply.UndoServiceData(ctx, st, filepath.Dir(journalPath))
+	prefErrs = append(prefErrs, svcErrs...)
 	files, err := engine.Undo(journalPath)
 	if err != nil {
 		return nil, nil, err
@@ -259,7 +263,7 @@ func Undo(ctx context.Context, journalPath string) (*engine.UndoReport, *apply.U
 		sys = apply.UndoSystem(ctx, st, system.New(), settings.New(filepath.Dir(journalPath)))
 		sys.Errors = append(sys.Errors, prefErrs...)
 		restored, errs := apply.UndoReplaced(st)
-		sys.Restored = restored
+		sys.Restored = append(svcRestored, restored...)
 		sys.Errors = append(sys.Errors, errs...)
 		if len(restored) > 0 {
 			sysexec.Run(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"daemon-reload"}})

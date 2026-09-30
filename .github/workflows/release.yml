@@ -95,3 +95,35 @@ jobs:
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS \
             --title "Bernard $GITHUB_REF_NAME" --notes-file notes.md $PRE
+
+  # Dépôt APT (GitHub Pages, branche gh-pages) : mises à jour par le
+  # gestionnaire de mises à jour du système. Nécessite le secret APT_GPG_KEY
+  # (clé privée du dépôt, voir docs/DEPOT-APT.md) ; sauté sinon.
+  apt:
+    needs: publish
+    runs-on: ubuntu-24.04
+    if: ${{ !contains(github.ref_name, '-') }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with: { name: deb, path: dist }
+      - name: Clé du dépôt
+        id: cle
+        env:
+          APT_GPG_KEY: ${{ secrets.APT_GPG_KEY }}
+        run: |
+          if [ -z "$APT_GPG_KEY" ]; then echo "::notice::Secret APT_GPG_KEY absent : dépôt APT non publié."; echo "ok=0" >> $GITHUB_OUTPUT; exit 0; fi
+          echo "$APT_GPG_KEY" | gpg --batch --import
+          echo "id=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')" >> $GITHUB_OUTPUT
+          echo "ok=1" >> $GITHUB_OUTPUT
+      - name: Publier
+        if: steps.cle.outputs.ok == '1'
+        run: |
+          sudo apt-get install -y apt-utils
+          git fetch origin gh-pages && git worktree add pages origin/gh-pages || { git worktree add --detach pages && (cd pages && git checkout --orphan gh-pages && git rm -rfq .); }
+          packaging/apt/publier.sh pages dist/bernard_*_amd64.deb "${{ steps.cle.outputs.id }}"
+          cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -qm "Dépôt APT : $GITHUB_REF_NAME"
+          git push origin HEAD:gh-pages

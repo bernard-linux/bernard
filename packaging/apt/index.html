@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dépôt APT de Bernard</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#12343B}
+pre{background:#EAF2EF;padding:1rem;border-radius:8px;overflow-x:auto}a{color:#1F7A6D}</style></head>
+<body>
+<h1>Dépôt APT de Bernard</h1>
+<p>Bernard, l'assistant de migration vers Linux. Le plus simple : téléchargez
+<a href="https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb">bernard_amd64.deb</a>
+et double-cliquez dessus ; ce dépôt est alors ajouté tout seul, et Bernard se met à jour avec le reste du système.</p>
+<p>Ou, dans un terminal :</p>
+<pre>wget -qO- https://bernard-linux.github.io/bernard/bernard-archive-keyring.gpg | sudo tee /usr/share/keyrings/bernard-archive-keyring.gpg &gt;/dev/null
+echo "deb [signed-by=/usr/share/keyrings/bernard-archive-keyring.gpg] https://bernard-linux.github.io/bernard stable main" | sudo tee /etc/apt/sources.list.d/bernard.list
+sudo apt update &amp;&amp; sudo apt install bernard</pre>
+<hr>
+<p lang="en"><strong>English:</strong> download <a href="https://github.com/bernard-linux/bernard/releases/latest/download/bernard_amd64.deb">bernard_amd64.deb</a> and open it; this repository is added automatically so Bernard gets updates with the rest of the system.</p>
+</body></html>

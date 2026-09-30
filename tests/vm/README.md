@@ -1,40 +1,34 @@
 # Banc d'essai en machines virtuelles
 
-L'intégration continue rejoue déjà une migration réelle complète dans des
-conteneurs Ubuntu 22.04 et 24.04, Debian 12, Mint 21 et 22
-(`.github/workflows/ci.yml`, tâche `e2e`). Ce que les conteneurs ne peuvent
-pas montrer, et que ce banc vérifie :
+Deux vraies machines (« ancien-pc » et « nouveau-pc ») reliées par un réseau
+privé, migration réelle, vérifications. Lancé par GitHub à chaque envoi
+(`.github/workflows/banc.yml`, avec KVM) sur des images cloud officielles :
+Ubuntu 22.04 et 24.04, Debian 12, et Ubuntu 22.04 → 24.04.
 
-- deux machines distinctes sur un vrai réseau (découverte par balises) ;
-- polkit, la fenêtre dédiée et une vraie session graphique ;
-- NetworkManager, CUPS et dconf dans une session réelle ;
-- la reconnexion en coupant l'interface réseau d'une machine virtuelle.
+Ce que les conteneurs de `tests/e2e` ne peuvent pas montrer, et que ce banc
+vérifie :
 
-## Mise en place (GNOME Boxes ou virt-manager)
+- la recherche automatique du nouvel ordinateur sur un vrai réseau ;
+- une vraie base MariaDB (service arrêté puis relancé des deux côtés, base
+  déjà présente sur le nouveau PC mise de côté en entier puis rendue par
+  l'annulation) ;
+- Docker (image, conteneur, volume ; images dans containerd depuis Docker 29) ;
+- un disque de données sorti de l'ancien PC et mis dans le nouveau : rattaché
+  par /etc/fstab, monté au redémarrage ;
+- un dépôt tiers (Visual Studio Code) quand Internet est joignable ;
+- la suppression du compte provisoire au redémarrage ;
+- l'annulation complète.
 
-1. Créer deux machines à partir des ISO officielles (Zorin, Ubuntu, Mint,
-   Debian GNOME), 4 Go de mémoire et 30 Go de disque chacune.
-2. Les placer sur le même réseau virtuel (réseau « default » de libvirt).
-3. Sur la **source** : créer un ou deux comptes, y déposer des documents,
-   changer le fond d'écran, la disposition du clavier et le dock, enregistrer
-   un réseau Wi-Fi fictif (`nmcli connection add type wifi ssid Test …`),
-   ajouter une tâche planifiée et une imprimante IPP fictive
-   (`lpadmin -p Test -E -v ipp://192.0.2.1/ipp/print -m everywhere`).
-4. Faire un instantané des deux machines.
-5. Installer les paquets `bernard` (et `bernard-window` sur la cible) :
-   `sudo apt install ./bernard_*.deb`.
+## Lancer à la main
 
-## Scénarios
+```sh
+make build
+sudo tests/vm/run.sh bin ancien.qcow2 nouveau.qcow2
+```
 
-| # | Source → cible | À vérifier |
-| --- | --- | --- |
-| 1 | Zorin 17 → Zorin 17 | parcours complet dans la fenêtre, reconnexion avec le compte migré |
-| 2 | Ubuntu 24.04 → Mint 22 | traduction GNOME → Cinnamon : fond, clavier, favoris |
-| 3 | Mint 22 → Ubuntu 24.04 | traduction inverse ; Snap non utilisé côté Mint |
-| 4 | Debian 12 → Zorin 17 | paquets renommés ou absents signalés dans le plan |
-| 5 | n'importe laquelle | couper la carte réseau de la cible pendant la copie (`virsh domif-setlink … down` puis `up`) : reprise sans nouveau code |
-| 6 | n'importe laquelle | paquet sur disque virtuel FAT32 avec un fichier de plus de 4 Go |
-| 7 | après 1 à 6 | « Annuler la migration » puis comparaison avec l'instantané |
+Sans `/dev/kvm`, QEMU émule : compter une heure. `BANC_GARDER=1` laisse les
+machines allumées (une relance reprend sans tout refaire), `BANC_DIR` garde
+les fichiers de travail et journaux.
 
-Revenir à l'instantané entre deux scénarios. Noter pour chacun : versions,
-débit affiché, messages obscurs, contenu de `/var/lib/bernard/*/rapport.json`.
+Les essais avec le vrai bureau (fenêtre, Zorin, Mint, navigateurs, clavier) se
+font à la main : voir `docs/VIRTUALBOX.md`.

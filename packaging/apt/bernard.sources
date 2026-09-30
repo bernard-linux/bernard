@@ -1,0 +1,8 @@
+# Dépôt de Bernard : mises à jour par le gestionnaire de mises à jour.
+# Ajouté par le paquet bernard ; retiré avec lui.
+Types: deb
+URIs: https://bernard-linux.github.io/bernard
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /usr/share/keyrings/bernard-archive-keyring.gpg

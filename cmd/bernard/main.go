@@ -67,7 +67,7 @@ Usage :
       Calcule ce qui serait fait sur CETTE machine. Ne modifie rien.
   bernard copy SOURCE DESTINATION
       Copie vérifiée d'un dossier local (outil de test).
-  sudo bernard remove-account IDENTIFIANT
+  sudo bernard remove-account [--at-boot] IDENTIFIANT
       Supprime un compte provisoire et son dossier personnel (utilisé au
       démarrage quand la suppression a été programmée en fin de migration).
   bernard version
@@ -563,9 +563,27 @@ func runUI(ctx context.Context, args []string) int {
 // runRemoveAccount supprime un compte provisoire. Lancée au démarrage par
 // l'unité systemd que programme l'écran de fin de migration.
 func runRemoveAccount(ctx context.Context, args []string) int {
+	atBoot := len(args) == 2 && args[0] == "--at-boot"
+	if atBoot {
+		args = args[1:]
+	}
 	if len(args) != 1 || os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, i18n.T("usage : sudo bernard remove-account IDENTIFIANT"))
+		fmt.Fprintln(os.Stderr, i18n.T("usage : sudo bernard remove-account [--at-boot] IDENTIFIANT"))
 		return 2
+	}
+	if atBoot {
+		// Même chose que le bouton de l'écran de fin : suppression au
+		// prochain démarrage, avant l'écran de connexion.
+		self, err := os.Executable()
+		if err == nil {
+			err = system.New().ScheduleRemoval(ctx, args[0], self)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.Tf("Compte %s non supprimé : %v", args[0], err))
+			return 1
+		}
+		fmt.Println(i18n.Tf("Compte %s supprimé au prochain démarrage.", args[0]))
+		return 0
 	}
 	if err := system.New().RemoveAccountNow(ctx, args[0]); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.Tf("Compte %s non supprimé : %v", args[0], err))

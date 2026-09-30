@@ -1,0 +1,44 @@
+name: Retour d'essai
+description: Vous avez essayé Bernard ? Racontez-nous comment ça s'est passé.
+title: "Essai : "
+labels: ["essai"]
+body:
+  - type: input
+    id: ancien
+    attributes:
+      label: Ancien ordinateur
+      description: Système et version (ex. Zorin OS 17, Linux Mint 21.3)
+    validations: { required: true }
+  - type: input
+    id: nouveau
+    attributes:
+      label: Nouvel ordinateur
+      description: Système et version (ex. Zorin OS 18)
+    validations: { required: true }
+  - type: dropdown
+    id: liaison
+    attributes:
+      label: Liaison
+      options: [Wi-Fi, Câble réseau, Câble Thunderbolt / USB-C, Disque externe]
+    validations: { required: true }
+  - type: dropdown
+    id: bilan
+    attributes:
+      label: Résultat
+      options: ["Tout est arrivé", "Presque tout", "Des choses importantes manquent", "La migration n'a pas abouti"]
+    validations: { required: true }
+  - type: textarea
+    id: manque
+    attributes:
+      label: Ce qui manque ou ne marche pas
+      description: Fichiers, applications, réglages, mots de passe…
+  - type: textarea
+    id: surprise
+    attributes:
+      label: Ce qui vous a surpris ou inquiété
+      description: Un mot incompris, une attente sans explication, une question bizarre…
+  - type: textarea
+    id: captures
+    attributes:
+      label: Captures d'écran, rapport.json
+      description: Glissez-les ici.

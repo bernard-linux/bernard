@@ -1,5 +1,38 @@
 # Historique des versions
 
+## 0.9.0 — 30 septembre 2026
+
+**Banc d'essai en machines virtuelles et dépôt APT : dernière étape avant la
+1.0.**
+
+- **Banc d'essai** (`tests/vm`, lancé par GitHub à chaque envoi) : deux vrais
+  systèmes (Ubuntu 22.04 et 24.04, Debian 12, et Ubuntu 22.04 → 24.04) reliés
+  par un réseau privé. Recherche automatique du nouvel ordinateur, vraie base
+  MariaDB, vrai Docker, disque déplacé d'un PC à l'autre, dépôt tiers,
+  redémarrage, suppression du compte provisoire, annulation.
+- Corrigé grâce au banc :
+  - **bases de données jamais copiées** : le nom de code du nouveau système
+    n'était pas lu, les deux systèmes semblaient toujours de versions
+    différentes (même défaut pour l'adaptation des dépôts tiers). Zorin 18,
+    Mint 22 et Ubuntu 24.04, de même base, sont maintenant reconnus comme
+    compatibles ;
+  - **Docker pas relancé sur l'ancien ordinateur** après la copie (seul son
+    « socket » l'était) ;
+  - **images Docker récentes absentes** : Docker 29 les range dans containerd
+    (`/var/lib/containerd`), maintenant repris aussi.
+- **Dossiers de services mis de côté en entier** : la base déjà présente sur
+  le nouvel ordinateur (MariaDB, Docker…) est mise de côté d'un bloc avant la
+  copie, et l'annulation la rend intacte. Plus jamais de mélange de fichiers
+  de deux bases ; la version migrée est gardée dans `apres-migration`.
+- `sudo bernard remove-account --at-boot COMPTE` : suppression d'un compte
+  provisoire au prochain démarrage, comme le bouton de l'écran de fin.
+- **Dépôt APT** : Bernard se met à jour avec le reste du système. Le paquet
+  ajoute le dépôt tout seul (voir `docs/DEPOT-APT.md`, une mise en place
+  unique).
+- Documents pour la validation : essais avec le vrai bureau
+  (`docs/VIRTUALBOX.md`), guide des testeurs (`docs/TESTEURS.md`) et
+  formulaire de retour d'essai sur GitHub.
+
 ## 0.8.0 — 29 septembre 2026
 
 **Bernard parle anglais.** Il prend la langue du système : français si

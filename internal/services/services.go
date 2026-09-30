@@ -65,11 +65,16 @@ func (c *Controller) Pause(ctx context.Context, spec string) (func(), error) {
 		}
 		return func() {}, nil
 	}
-	var stopped []string
+	// États relevés AVANT tout arrêt : arrêter docker.socket arrête aussi
+	// docker.service, qui ne serait sinon plus vu actif ni relancé.
+	var active []string
 	for _, u := range units {
-		if !c.active(ctx, u) {
-			continue
+		if c.active(ctx, u) {
+			active = append(active, u)
 		}
+	}
+	var stopped []string
+	for _, u := range active {
 		if _, err := c.Exec(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"stop", u}}); err != nil {
 			c.resume(stopped)
 			return nil, i18n.Errorf("arrêt du service %s impossible : %w", u, err)

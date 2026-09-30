@@ -69,7 +69,7 @@ Usage :
       Calcule ce qui serait fait sur CETTE machine. Ne modifie rien.
   bernard copy SOURCE DESTINATION
       Copie vérifiée d'un dossier local (outil de test).
-  sudo bernard remove-account IDENTIFIANT
+  sudo bernard remove-account [--at-boot] IDENTIFIANT
       Supprime un compte provisoire et son dossier personnel (utilisé au
       démarrage quand la suppression a été programmée en fin de migration).
   bernard version
@@ -95,7 +95,7 @@ Usage:
       Works out what would be done on THIS computer. Changes nothing.
   bernard copy SOURCE DESTINATION
       Verified copy of a local folder (testing tool).
-  sudo bernard remove-account LOGIN
+  sudo bernard remove-account [--at-boot] LOGIN
       Removes a temporary account and its home folder (used at start-up
       when the removal was scheduled at the end of the migration).
   bernard version
@@ -194,8 +194,9 @@ Usage:
 		"s'arrêter à la fermeture de l'entrée standard":                                                              "stop when standard input is closed",
 		"langue de l'interface (fr, en), transmise par « bernard gui »":                                              "interface language (fr, en), passed on by “bernard gui”",
 		"Le moteur doit être lancé en administrateur : utilisez « bernard gui ».":                                    "The engine must be run as administrator: use “bernard gui”.",
-		"usage : sudo bernard remove-account IDENTIFIANT":                                                            "usage: sudo bernard remove-account LOGIN",
+		"usage : sudo bernard remove-account [--at-boot] IDENTIFIANT":                                                "usage: sudo bernard remove-account [--at-boot] LOGIN",
 		"Compte %s non supprimé : %v":                                                                                "Account %s not removed: %v",
+		"Compte %s supprimé au prochain démarrage.":                                                                  "Account %s will be deleted at the next start-up.",
 		"Compte %s supprimé, avec son dossier personnel.":                                                            "Account %s removed, along with its home folder.",
 		"Attention : lancez plutôt « bernard gui » sans sudo ; la fenêtre ne devrait pas tourner en administrateur.": "Warning: run “bernard gui” without sudo instead; the window shouldn't run as administrator.",
 		"Impossible de lancer le moteur :":                                                                           "Can't start the engine:",

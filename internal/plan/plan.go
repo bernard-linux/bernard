@@ -424,10 +424,11 @@ func diskAction(it inventory.SystemItem, ds inventory.DataSet, inv *inventory.In
 	return a
 }
 
-// sameRelease : même distribution et même base (nom de code) des deux côtés,
-// donc mêmes versions majeures des serveurs de bases de données.
+// sameRelease : même base (nom de code Ubuntu ou Debian) des deux côtés,
+// donc mêmes versions des serveurs de bases de données. Zorin 18, Mint 22
+// et Ubuntu 24.04 partagent la base « noble ».
 func sameRelease(src inventory.Source, t Target) bool {
-	return src.Distro == t.Distro && src.Codename != "" && src.Codename == t.Codename
+	return src.Codename != "" && src.Codename == t.Codename
 }
 
 func serviceNote(it inventory.SystemItem, src inventory.Source, t Target) string {

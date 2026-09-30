@@ -146,6 +146,9 @@ var recognizers = []struct {
 	{"var/lib/postgresql", inventory.SysDatabase, i18n.N("Bases PostgreSQL"), "postgresql"},
 	{"var/lib/mongodb", inventory.SysDatabase, i18n.N("Bases MongoDB"), "mongod"},
 	{"var/lib/redis", inventory.SysDatabase, i18n.N("Données Redis"), "redis-server"},
+	// Docker 29 et suivants rangent les images dans containerd : copiées
+	// avant /var/lib/docker (conteneurs et volumes), qui y fait référence.
+	{"var/lib/containerd", inventory.SysContainer, i18n.N("Docker et containerd : images"), "docker.socket docker containerd"},
 	{"var/lib/docker", inventory.SysContainer, i18n.N("Docker : images, conteneurs et volumes"), "docker.socket docker"},
 	{"var/lib/containers", inventory.SysContainer, i18n.N("Podman : images et conteneurs"), "podman.socket podman"},
 	{"var/snap/lxd/common/lxd", inventory.SysContainer, i18n.N("LXD : conteneurs"), "snap.lxd.daemon"},

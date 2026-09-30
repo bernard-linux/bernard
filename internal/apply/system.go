@@ -221,9 +221,14 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 			}
 			ds.Include = keep
 		}
-		svc := services.New()
+		svc := newServices()
 		if ds.Service != "" {
 			svc.Stop(ctx, ds.Service) // service de la cible arrêté pendant qu'on dépose ses données
+		}
+		if ds.Service != "" {
+			if err := setAsideWhole(r, aside, ds.Dest, ds.Service); err != nil {
+				return out, err
+			}
 		}
 		rep, err := r.CopyDataSetAs(ctx, ds, ds.Dest, nil)
 		if ds.Service != "" {
@@ -249,6 +254,93 @@ func CopySystem(ctx context.Context, r *engine.Receiver, p *plan.Plan, inv *inve
 		sysexec.Run(ctx, sysexec.Cmd{Name: "systemctl", Args: []string{"daemon-reload"}})
 	}
 	return out, nil
+}
+
+// newServices : pilote des services (remplacé dans les tests).
+var newServices = services.New
+
+// setAsideWhole met de côté, en entier, le dossier de données d'un service
+// de la cible (base neuve créée par l'installation du paquet, par exemple)
+// avant d'y déposer celui de l'ancien ordinateur. Les fichiers de deux bases
+// ne sont ainsi jamais mélangés, ni à la copie ni à l'annulation. Sans effet
+// si le dossier est vide ou absent, ou déjà traité (reprise).
+func setAsideWhole(r *engine.Receiver, aside, dest, service string) error {
+	for _, rec := range r.State.Sys {
+		if rec.Op == journal.SysServiceData && rec.Name == dest {
+			return nil
+		}
+	}
+	fi, err := os.Lstat(dest)
+	if err != nil || !fi.IsDir() {
+		return nil
+	}
+	if entries, _ := os.ReadDir(dest); len(entries) == 0 {
+		return nil
+	}
+	whole := filepath.Join(aside, "services", dest)
+	if _, err := os.Lstat(whole); err == nil {
+		return nil
+	}
+	rec := journal.Record{T: journal.RecSys, Op: journal.SysServiceData, Name: dest, Dst: whole, Service: service}
+	if err := r.Journal.Append(rec); err != nil {
+		return err
+	}
+	r.State.Sys = append(r.State.Sys, rec)
+	if err := os.MkdirAll(filepath.Dir(whole), 0o700); err != nil {
+		return err
+	}
+	if err := os.Rename(dest, whole); err != nil {
+		// Autre disque : on garde la mise de côté fichier par fichier.
+		return nil
+	}
+	// Dossier vide recréé avec les droits et le propriétaire d'origine
+	// (/var/lib/mysql appartient à mysql).
+	if err := os.Mkdir(dest, fi.Mode().Perm()); err != nil {
+		os.Rename(whole, dest)
+		return err
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		os.Chown(dest, int(st.Uid), int(st.Gid))
+	}
+	os.Chmod(dest, fi.Mode().Perm()|fi.Mode()&(os.ModeSetgid|os.ModeSticky))
+	return nil
+}
+
+// UndoServiceData remet en place, en entier, les dossiers de données des
+// services mis de côté. Le service est arrêté pendant l'échange ; la
+// version migrée est gardée dans apres-migration (rien n'est perdu, même
+// si la base a servi depuis). À appeler AVANT l'annulation des fichiers.
+func UndoServiceData(ctx context.Context, st *journal.State, stateDir string) (restored, errs []string) {
+	svc := newServices()
+	for i := len(st.Sys) - 1; i >= 0; i-- {
+		r := st.Sys[i]
+		if r.Op != journal.SysServiceData {
+			continue
+		}
+		if _, err := os.Lstat(r.Dst); err != nil {
+			continue // pas mis de côté (autre disque) ou déjà remis
+		}
+		svc.Stop(ctx, r.Service)
+		after := filepath.Join(stateDir, "apres-migration", r.Name)
+		if _, err := os.Lstat(r.Name); err == nil {
+			if err := os.MkdirAll(filepath.Dir(after), 0o700); err == nil {
+				os.RemoveAll(after)
+				err = os.Rename(r.Name, after)
+			}
+			if err != nil {
+				errs = append(errs, i18n.Tf("%s : %v", r.Name, err))
+				svc.Start(ctx, r.Service)
+				continue
+			}
+		}
+		if err := os.Rename(r.Dst, r.Name); err != nil {
+			errs = append(errs, i18n.Tf("%s : %v", r.Name, err))
+			continue
+		}
+		svc.Start(ctx, r.Service)
+		restored = append(restored, r.Name)
+	}
+	return restored, errs
 }
 
 // UndoReplaced remet en place les fichiers de la cible mis de côté, après

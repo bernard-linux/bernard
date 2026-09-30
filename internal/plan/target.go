@@ -3,6 +3,7 @@ package plan
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,22 +20,29 @@ import (
 
 // DetectTarget relève l'état de la machine courante, considérée comme cible.
 // Lecture seule.
+// parseOSRelease lit /etc/os-release : distribution, version et nom de code
+// (celui d'Ubuntu d'abord : Zorin et Mint donnent aussi le leur, qui ne
+// désigne pas leurs dépôts Ubuntu).
+func parseOSRelease(r io.Reader) (distro, version, codename string) {
+	kv := map[string]string{}
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		k, v, _ := strings.Cut(sc.Text(), "=")
+		kv[k] = strings.Trim(v, `"'`)
+	}
+	codename = kv["UBUNTU_CODENAME"]
+	if codename == "" {
+		codename = kv["VERSION_CODENAME"]
+	}
+	return kv["ID"], kv["VERSION_ID"], codename
+}
+
 func DetectTarget(ctx context.Context, run sysexec.Runner) (Target, []string) {
 	var warnings []string
 	t := Target{HomeRoot: "/home", ExistingUsers: map[string]bool{}}
 
 	if f, err := os.Open("/etc/os-release"); err == nil {
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			k, v, _ := strings.Cut(sc.Text(), "=")
-			v = strings.Trim(v, `"'`)
-			switch k {
-			case "ID":
-				t.Distro = v
-			case "VERSION_ID":
-				t.Version = v
-			}
-		}
+		t.Distro, t.Version, t.Codename = parseOSRelease(f)
 		f.Close()
 	}
 	t.Desktop = settings.DetectDesktop("/")

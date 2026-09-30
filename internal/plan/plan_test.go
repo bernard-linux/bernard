@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bernard-linux/bernard/internal/inventory"
@@ -154,5 +155,16 @@ func TestPlanSettingsAndPrinters(t *testing.T) {
 		if a.Op == OpSettings && a.Reason != ReasonDesktopMismatch {
 			t.Errorf("vers KDE, seuls les éléments transposables doivent suivre : %+v", a)
 		}
+	}
+}
+
+func TestParseOSRelease(t *testing.T) {
+	d, v, c := parseOSRelease(strings.NewReader("NAME=\"Zorin OS\"\nID=zorin\nVERSION_ID=\"18\"\nVERSION_CODENAME=zorin18\nUBUNTU_CODENAME=noble\n"))
+	if d != "zorin" || v != "18" || c != "noble" {
+		t.Errorf("%s %s %s", d, v, c)
+	}
+	_, _, c = parseOSRelease(strings.NewReader("ID=debian\nVERSION_CODENAME=bookworm\n"))
+	if c != "bookworm" {
+		t.Errorf("debian : %s", c)
 	}
 }

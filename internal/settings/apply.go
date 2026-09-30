@@ -344,3 +344,50 @@ func ClearPristineSkeleton(home, skel string) ([]string, error) {
 	})
 	return removed, err
 }
+
+// ---------------------------------------------------------------- polices
+
+// RebuildFontCache refait l'index des polices d'un compte migré. Cet index
+// (~/.cache/fontconfig) est propre à chaque machine : un index qui ne
+// correspond pas aux polices présentes fait planter l'affichage web de
+// WebKit (fenêtre de Bernard, aide Yelp, Evolution restent blancs), alors que
+// les autres applications le tolèrent. Il n'est jamais copié ; celui qui a
+// pu se créer ici pendant la migration est jeté, puis reconstruit avec les
+// polices réellement présentes (celles du système et celles du compte).
+func (a *Applier) RebuildFontCache(ctx context.Context, login, home string) error {
+	if !loginRe.MatchString(login) {
+		return i18n.Errorf("identifiant refusé : %q", login)
+	}
+	for _, rel := range []string{".cache/fontconfig", ".fontconfig"} {
+		p := filepath.Join(home, rel)
+		// Jamais à travers un lien symbolique (~/.cache peut en être un).
+		if fi, err := os.Lstat(filepath.Dir(p)); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if fi, err := os.Lstat(p); err == nil && fi.IsDir() {
+			if rel == ".fontconfig" && !onlyFontCaches(p) {
+				continue // ancien emplacement : on ne jette que des index
+			}
+			os.RemoveAll(p)
+		}
+	}
+	_, err := a.Exec(ctx, sysexec.Cmd{Name: "runuser", Args: []string{"-u", login, "--", "env",
+		"HOME=" + home, "XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "fc-cache", "-f"}})
+	return err
+}
+
+// onlyFontCaches : le dossier ne contient que des index de fontconfig
+// (*.cache-N, CACHEDIR.TAG), ancien emplacement ~/.fontconfig.
+func onlyFontCaches(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !(strings.Contains(n, ".cache-") || n == "CACHEDIR.TAG") {
+			return false
+		}
+	}
+	return true
+}

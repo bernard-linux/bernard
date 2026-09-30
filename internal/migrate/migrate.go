@@ -232,6 +232,7 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 	if err != nil {
 		return res, err
 	}
+	rebuildFontCaches(ctx, s, settings.New(filepath.Dir(s.JournalPath)), log)
 	res.Bilan = WriteBilan(res, s, j)
 	j.Append(journal.Record{T: journal.RecFinish})
 	res.ReportPath = filepath.Join(filepath.Dir(s.JournalPath), "rapport.json")
@@ -239,6 +240,26 @@ func Execute(ctx context.Context, src source.Source, s *Session, ch Choices, sec
 		os.WriteFile(res.ReportPath, b, 0o600)
 	}
 	return res, nil
+}
+
+// rebuildFontCaches refait l'index des polices de chaque compte migré (voir
+// settings.RebuildFontCache). Sans fc-cache, l'index se refera à la
+// première ouverture de session.
+func rebuildFontCaches(ctx context.Context, s *Session, sa *settings.Applier, log func(string)) {
+	done := map[string]bool{}
+	for _, a := range s.Plan.Actions {
+		if !a.Selected || a.Op != plan.OpCopy || a.Login == "" || done[a.Login] {
+			continue
+		}
+		done[a.Login] = true
+		_, _, home, err := system.Owner(a.Login)
+		if err != nil {
+			continue
+		}
+		if err := sa.RebuildFontCache(ctx, a.Login, home); err != nil {
+			log(i18n.Tf("  index des polices de %s : sera refait à la première ouverture de session", a.Login))
+		}
+	}
 }
 
 // Undo annule une migration : fichiers d'abord, puis applications et comptes.

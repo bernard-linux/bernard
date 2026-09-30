@@ -58,6 +58,24 @@ administrateurs et les machines sans écran.
 
 Guide des essais entre deux ordinateurs : [docs/ESSAIS.md](docs/ESSAIS.md).
 
+### Dépannage : fenêtre blanche
+
+Si la fenêtre de Bernard reste blanche, Bernard s'ouvre de lui-même dans le
+navigateur au bout de quelques secondes, puis les fois suivantes.
+
+Si **toutes** les fenêtres web restent blanches (Bernard, l'aide du système,
+l'aperçu des messages d'Evolution) alors qu'un autre compte n'a pas le
+problème, l'index des polices du compte est abîmé. Dans un terminal, avec ce
+compte :
+
+```sh
+rm -rf ~/.cache/fontconfig
+fc-cache -f
+```
+
+puis relancer les applications. Depuis la 0.9.1, Bernard ne reprend jamais cet
+index (propre à chaque machine) et le refait pour chaque compte migré.
+
 ## Essayer (développeurs)
 
 Prérequis : Go 1.22 ou plus récent. `make build` produit `bin/bernard` et

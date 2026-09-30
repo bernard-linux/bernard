@@ -3,6 +3,7 @@ package i18n
 // Catalogue anglais : plan, exécution (apply) et migration (bilan compris).
 func init() {
 	add(map[string]string{
+		"  index des polices de %s : sera refait à la première ouverture de session": "  font index for %s: will be rebuilt at first login",
 		// internal/plan
 		"dépôt %s":           "software source %s",
 		"Flatpak et Flathub": "Flatpak and Flathub",

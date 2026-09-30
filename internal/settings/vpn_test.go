@@ -1,8 +1,12 @@
 package settings
 
 import (
+	"context"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/bernard-linux/bernard/internal/sysexec"
 )
 
 func TestSanitizeVPN(t *testing.T) {
@@ -61,5 +65,41 @@ edge-tiling=true
 	cin := Translate(ParseDump("[org/cinnamon]\nenabled-applets=['panel1:left:0:menu@cinnamon.org:0']\nnext-applet-id=12\n"), "cinnamon", "cinnamon", nil, Hardware{KeepKeyboard: true})
 	if cin["org/cinnamon"]["enabled-applets"] == "" || cin["org/cinnamon"]["next-applet-id"] != "" {
 		t.Errorf("cinnamon : %v", cin["org/cinnamon"])
+	}
+}
+
+func TestRebuildFontCache(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(home+"/.cache/fontconfig", 0o755)
+	os.WriteFile(home+"/.cache/fontconfig/abc-le64.cache-9", []byte("index abîmé"), 0o644)
+	os.MkdirAll(home+"/.fontconfig", 0o755)
+	os.WriteFile(home+"/.fontconfig/abc-le64.cache-3", []byte("ancien index"), 0o644)
+	os.MkdirAll(home+"/.config/fontconfig", 0o755)
+	os.WriteFile(home+"/.config/fontconfig/fonts.conf", []byte("<fontconfig/>"), 0o644)
+	var got []string
+	a := &Applier{Exec: func(_ context.Context, c sysexec.Cmd) (string, error) {
+		got = append(got, c.Name+" "+strings.Join(c.Args, " "))
+		return "", nil
+	}}
+	if err := a.RebuildFontCache(context.Background(), "alice", home); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/.cache/fontconfig", "/.fontconfig"} {
+		if _, err := os.Stat(home + p); err == nil {
+			t.Errorf("%s : index non jeté", p)
+		}
+	}
+	if _, err := os.Stat(home + "/.config/fontconfig/fonts.conf"); err != nil {
+		t.Error("réglages des polices de l'utilisateur perdus")
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], "runuser -u alice -- env HOME="+home) || !strings.HasSuffix(got[0], "fc-cache -f") {
+		t.Errorf("commande : %v", got)
+	}
+	// ~/.fontconfig contenant autre chose qu'un index : laissé en place.
+	os.MkdirAll(home+"/.fontconfig", 0o755)
+	os.WriteFile(home+"/.fontconfig/fonts.conf", []byte("<fontconfig/>"), 0o644)
+	a.RebuildFontCache(context.Background(), "alice", home)
+	if _, err := os.Stat(home + "/.fontconfig/fonts.conf"); err != nil {
+		t.Error("~/.fontconfig personnel supprimé")
 	}
 }

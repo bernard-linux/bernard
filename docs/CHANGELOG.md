@@ -1,5 +1,25 @@
 # Historique des versions
 
+## 0.9.1 — 30 septembre 2026
+
+**Fenêtres web blanches après migration** (fenêtre de Bernard, aide Yelp,
+aperçu d'Evolution), constaté sur un poste migré : l'index des polices du
+compte (`~/.cache/fontconfig`) ne correspondait pas aux polices présentes, et
+le moteur d'affichage web de WebKit plante en le lisant.
+
+- L'index des polices n'est jamais repris, ni à son emplacement actuel
+  (`~/.cache`, exclu depuis toujours) ni à l'ancien (`~/.fontconfig`, qui ne
+  l'était pas) ; le cache OpenGL des pilotes NVIDIA (`~/.nv`), propre à la
+  carte, non plus.
+- Après la copie, l'index de chaque compte migré est jeté puis refait
+  (`fc-cache -f`) avec les polices réellement présentes, y compris un index
+  qui aurait pu se créer pendant la migration.
+- Les réglages des polices (`~/.config/fontconfig`) et les polices ajoutées
+  (`~/.local/share/fonts`, `~/.fonts`) sont toujours repris.
+- Dépannage « fenêtre blanche » ajouté au mode d'emploi (README).
+- Test de bout en bout : un index abîmé sur l'ancien PC n'arrive jamais sur le
+  nouveau, l'index y est refait.
+
 ## 0.9.0 — 30 septembre 2026
 
 **Banc d'essai en machines virtuelles et dépôt APT : dernière étape avant la

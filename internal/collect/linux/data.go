@@ -12,7 +12,9 @@ import (
 // caches et verrous des navigateurs (voir browserExcludes). L'utilisateur
 // pourra les réintégrer dans l'interface.
 var DefaultExcludes = append([]string{
-	".cache",
+	".cache",      // dont l'index des polices (fontconfig), propre à la machine
+	".fontconfig", // ancien emplacement de l'index des polices
+	".nv",         // cache OpenGL des pilotes NVIDIA, propre à la carte
 	".local/share/Trash",
 	".thumbnails",
 	".var/app/*/cache",
